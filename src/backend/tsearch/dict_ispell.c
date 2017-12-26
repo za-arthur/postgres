@@ -24,6 +24,7 @@ typedef struct
 {
 	StopList	stoplist;
 	IspellDict	obj;
+	IspellDictBuild build;
 } DictISpell;
 
 Datum
@@ -38,7 +39,7 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
 
-	NIStartBuild(&(d->obj));
+	NIStartBuild(&(d->build));
 
 	foreach(l, dictoptions)
 	{
@@ -50,7 +51,7 @@ dispell_init(PG_FUNCTION_ARGS)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple DictFile parameters")));
-			NIImportDictionary(&(d->obj),
+			NIImportDictionary(&(d->build),
 							   get_tsearch_config_filename(defGetString(defel),
 														   "dict"));
 			dictloaded = true;
@@ -61,7 +62,7 @@ dispell_init(PG_FUNCTION_ARGS)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple AffFile parameters")));
-			NIImportAffixes(&(d->obj),
+			NIImportAffixes(&(d->obj), &(d->build),
 							get_tsearch_config_filename(defGetString(defel),
 														"affix"));
 			affloaded = true;
@@ -86,8 +87,8 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	if (affloaded && dictloaded)
 	{
-		NISortDictionary(&(d->obj));
-		NISortAffixes(&(d->obj));
+		NISortDictionary(&(d->obj), &(d->build));
+		NISortAffixes(&(d->obj), &(d->build));
 	}
 	else if (!affloaded)
 	{
@@ -102,7 +103,7 @@ dispell_init(PG_FUNCTION_ARGS)
 				 errmsg("missing DictFile parameter")));
 	}
 
-	NIFinishBuild(&(d->obj));
+	NIFinishBuild(&(d->build));
 
 	PG_RETURN_POINTER(d);
 }

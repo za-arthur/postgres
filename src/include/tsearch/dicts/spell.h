@@ -176,6 +176,28 @@ typedef struct CompoundAffixFlag
 
 #define FLAGNUM_MAXSIZE		(1 << 16)
 
+/*
+ * IspellDictBuild is used to initialize IspellDict struct.  This is a
+ * temprorary structure which is setup by NIStartBuild() and released by
+ * NIFinishBuild().
+ */
+typedef struct IspellDictBuild
+{
+	MemoryContext buildCxt;		/* temp context for construction */
+
+	/* Array of Hunspell options in affix file */
+	CompoundAffixFlag *CompoundAffixFlags;
+	/* number of entries in CompoundAffixFlags array */
+	int			nCompoundAffixFlag;
+	/* allocated length of CompoundAffixFlags array */
+	int			mCompoundAffixFlag;
+
+	/* Temporary array of all words in the dict file */
+	SPELL	  **Spell;
+	int			nspell;			/* number of valid entries in Spell array */
+	int			mspell;			/* allocated length of Spell array */
+} IspellDictBuild;
+
 typedef struct
 {
 	int			maffixes;
@@ -197,28 +219,6 @@ typedef struct
 	bool		usecompound;
 	FlagMode	flagMode;
 
-	/*
-	 * All follow fields are actually needed only for initialization
-	 */
-
-	/* Array of Hunspell options in affix file */
-	CompoundAffixFlag *CompoundAffixFlags;
-	/* number of entries in CompoundAffixFlags array */
-	int			nCompoundAffixFlag;
-	/* allocated length of CompoundAffixFlags array */
-	int			mCompoundAffixFlag;
-
-	/*
-	 * Remaining fields are only used during dictionary construction; they are
-	 * set up by NIStartBuild and cleared by NIFinishBuild.
-	 */
-	MemoryContext buildCxt;		/* temp context for construction */
-
-	/* Temporary array of all words in the dict file */
-	SPELL	  **Spell;
-	int			nspell;			/* number of valid entries in Spell array */
-	int			mspell;			/* allocated length of Spell array */
-
 	/* These are used to allocate "compact" data without palloc overhead */
 	char	   *firstfree;		/* first free address (always maxaligned) */
 	size_t		avail;			/* free space remaining at firstfree */
@@ -226,11 +226,13 @@ typedef struct
 
 extern TSLexeme *NINormalizeWord(IspellDict *Conf, char *word);
 
-extern void NIStartBuild(IspellDict *Conf);
-extern void NIImportAffixes(IspellDict *Conf, const char *filename);
-extern void NIImportDictionary(IspellDict *Conf, const char *filename);
-extern void NISortDictionary(IspellDict *Conf);
-extern void NISortAffixes(IspellDict *Conf);
-extern void NIFinishBuild(IspellDict *Conf);
+extern void NIStartBuild(IspellDictBuild *ConfBuild);
+extern void NIImportAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
+							const char *filename);
+extern void NIImportDictionary(IspellDictBuild *ConfBuild,
+							   const char *filename);
+extern void NISortDictionary(IspellDict *Conf, IspellDictBuild *ConfBuild);
+extern void NISortAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild);
+extern void NIFinishBuild(IspellDictBuild *ConfBuild);
 
 #endif
