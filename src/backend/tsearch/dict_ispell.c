@@ -23,7 +23,6 @@
 typedef struct
 {
 	StopList	stoplist;
-	IspellDict	obj;
 	IspellDictBuild build;
 } DictISpell;
 
@@ -62,7 +61,7 @@ dispell_init(PG_FUNCTION_ARGS)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple AffFile parameters")));
-			NIImportAffixes(&(d->obj), &(d->build),
+			NIImportAffixes(&(d->build),
 							get_tsearch_config_filename(defGetString(defel),
 														"affix"));
 			affloaded = true;
@@ -87,8 +86,8 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	if (affloaded && dictloaded)
 	{
-		NISortDictionary(&(d->obj), &(d->build));
-		NISortAffixes(&(d->obj), &(d->build));
+		NISortDictionary(&(d->build));
+		NISortAffixes(&(d->build));
 	}
 	else if (!affloaded)
 	{
