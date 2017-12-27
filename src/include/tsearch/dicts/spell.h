@@ -86,21 +86,38 @@ typedef struct spell_struct
  */
 typedef struct aff_struct
 {
-	char	   *flag;
 	/* FF_SUFFIX or FF_PREFIX */
-	uint32		type:1,
+	uint16		type:1,
 				flagflags:7,
 				issimple:1,
 				isregis:1,
-				replen:14;
-	char	   *find;
-	char	   *repl;
-	union
-	{
-		regex_t		regex;
-		Regis		regis;
-	}			reg;
+				flaglen:2;
+
+	/* 8 bytes could be too mach for repl and find, but who knows */
+	uint8		replen;
+	uint8		findlen;
+
+	/*
+	 * fields stores the following data (each ends with 0):
+	 * - repl
+	 * - find
+	 * - flag - one character (if FM_CHAR),
+	 *          two characters (if FM_LONG),
+	 *          number, >= 0 and < 65536 (if FM_NUM).
+	 */
+	char		fields[FLEXIBLE_ARRAY_MEMBER];
 } AFFIX;
+
+#define AF_FLAG_MAXSIZE		5		/* strlen(65536) */
+#define AF_REPL_MAXSIZE		255		/* 8 bytes */
+#define AF_FIND_MAXSIZE		255		/* 8 bytes */
+
+#define AFFIXHDRSZ	(offsetof(AFFIX, fields))
+
+#define AffixFieldRepl(af)	((af)->fields)
+#define AffixFieldFind(af)	((af)->fields + (af)->replen + 1)
+#define AffixFieldFlag(af)	(AffixFieldFind(af) + (af)->findlen + 1)
+#define AffixSize(af)		(AFFIXHDRSZ + strlen((af)->fields) + 1)
 
 /*
  * affixes use dictionary flags too
@@ -196,14 +213,16 @@ typedef struct IspellDictBuild
 	SPELL	  **Spell;
 	int			nspell;			/* number of valid entries in Spell array */
 	int			mspell;			/* allocated length of Spell array */
+
+	/* Temporary array of all affixes in the aff file */
+	AFFIX	  **Affix;
+	int			naffix;			/* number of valid entries in Affix array */
+	int			maffix;			/* allocated length of Affix array */
+	int			affixsize;		/* whole size of valid entries */
 } IspellDictBuild;
 
 typedef struct
 {
-	int			maffixes;
-	int			naffixes;
-	AFFIX	   *Affix;
-
 	AffixNode  *Suffix;
 	AffixNode  *Prefix;
 
@@ -222,7 +241,15 @@ typedef struct
 	/* These are used to allocate "compact" data without palloc overhead */
 	char	   *firstfree;		/* first free address (always maxaligned) */
 	size_t		avail;			/* free space remaining at firstfree */
+
+	/*
+	 * data stores:
+	 * - array of AFFIX
+	 */
+	char		data[FLEXIBLE_ARRAY_MEMBER];
 } IspellDict;
+
+#define IspellDictHdrSize	(offsetof(IspellDict, data))
 
 extern TSLexeme *NINormalizeWord(IspellDict *Conf, char *word);
 

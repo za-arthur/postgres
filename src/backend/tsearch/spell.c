@@ -183,7 +183,7 @@ lowerstr_ctx(IspellDictBuild *ConfBuild, const char *src)
 
 #define STRNCMP(s,p)	strncmp( (s), (p), strlen(p) )
 #define GETWCHAR(W,L,N,T) ( ((const uint8*)(W))[ ((T)==FF_PREFIX) ? (N) : ( (L) - 1 - (N) ) ] )
-#define GETCHAR(A,N,T)	  GETWCHAR( (A)->repl, (A)->replen, N, T )
+#define GETCHAR(A,N,T)	  GETWCHAR( AffixFieldRepl(A), (A)->replen, N, T )
 
 static char *VoidString = "";
 
@@ -312,10 +312,10 @@ cmpaffix(const void *s1, const void *s2)
 	if (a1->type > a2->type)
 		return 1;
 	if (a1->type == FF_PREFIX)
-		return strcmp(a1->repl, a2->repl);
+		return strcmp(AffixFieldRepl(a1), AffixFieldRepl(a2));
 	else
-		return strbcmp((const unsigned char *) a1->repl,
-					   (const unsigned char *) a2->repl);
+		return strbcmp((const unsigned char *) AffixFieldRepl(a1),
+					   (const unsigned char *) AffixFieldRepl(a2));
 }
 
 /*
@@ -676,22 +676,42 @@ NIAddAffix(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		   const char *find, const char *repl, int type)
 {
 	AFFIX	   *Affix;
+	size_t		flaglen = strlen(flag);
+	size_t		findlen = strlen(find);
+	size_t		repllen = strlen(repl);
 
-	if (Conf->naffixes >= Conf->maffixes)
+	/* Sanity checks */
+	if (flaglen > AF_FLAG_MAXSIZE)
+		ereport(ERROR,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("affix flag \"%s\" too long", flag)));
+	if (findlen > AF_FIND_MAXSIZE)
+		ereport(ERROR,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("affix find field \"%s\" too long", find)));
+	if (repllen > AF_REPL_MAXSIZE)
+		ereport(ERROR,
+				(errcode(ERRCODE_CONFIG_FILE_ERROR),
+				 errmsg("affix repl field \"%s\" too long", repl)));
+
+	if (ConfBuild->naffix >= ConfBuild->maffix)
 	{
-		if (Conf->maffixes)
+		if (ConfBuild->maffix)
 		{
-			Conf->maffixes *= 2;
-			Conf->Affix = (AFFIX *) repalloc((void *) Conf->Affix, Conf->maffixes * sizeof(AFFIX));
+			ConfBuild->maffix *= 2;
+			ConfBuild->Affix = (AFFIX **) repalloc(ConfBuild->Affix,
+												   ConfBuild->maffix * sizeof(AFFIX *));
 		}
 		else
 		{
-			Conf->maffixes = 16;
-			Conf->Affix = (AFFIX *) palloc(Conf->maffixes * sizeof(AFFIX));
+			ConfBuild->maffix = 255;
+			ConfBuild->Affix = (AFFIX **) tmpalloc(ConfBuild->maffix * sizeof(AFFIX *));
 		}
 	}
 
-	Affix = Conf->Affix + Conf->naffixes;
+	Affix = (AFFIX *) tmpalloc(AFFIXHDRSZ + flaglen + 1 +
+							   findlen + 1 + repllen + 1);
+	ConfBuild->Affix[ConfBuild->naffix] = Affix;
 
 	/* This affix rule can be applied for words with any ending */
 	if (strcmp(mask, ".") == 0 || *mask == '\0')
@@ -704,42 +724,42 @@ NIAddAffix(IspellDict *Conf, IspellDictBuild *ConfBuild,
 	{
 		Affix->issimple = 0;
 		Affix->isregis = 1;
-		RS_compile(&(Affix->reg.regis), (type == FF_SUFFIX),
-				   *mask ? mask : VoidString);
+//		RS_compile(&(Affix->reg.regis), (type == FF_SUFFIX),
+//				   *mask ? mask : VoidString);
 	}
 	/* This affix rule will use regex_t to search word ending */
 	else
 	{
-		int			masklen;
-		int			wmasklen;
-		int			err;
-		pg_wchar   *wmask;
-		char	   *tmask;
+//		int			masklen;
+//		int			wmasklen;
+//		int			err;
+//		pg_wchar   *wmask;
+//		char	   *tmask;
 
 		Affix->issimple = 0;
 		Affix->isregis = 0;
-		tmask = (char *) tmpalloc(strlen(mask) + 3);
-		if (type == FF_SUFFIX)
-			sprintf(tmask, "%s$", mask);
-		else
-			sprintf(tmask, "^%s", mask);
+//		tmask = (char *) tmpalloc(strlen(mask) + 3);
+//		if (type == FF_SUFFIX)
+//			sprintf(tmask, "%s$", mask);
+//		else
+//			sprintf(tmask, "^%s", mask);
 
-		masklen = strlen(tmask);
-		wmask = (pg_wchar *) tmpalloc((masklen + 1) * sizeof(pg_wchar));
-		wmasklen = pg_mb2wchar_with_len(tmask, wmask, masklen);
+//		masklen = strlen(tmask);
+//		wmask = (pg_wchar *) tmpalloc((masklen + 1) * sizeof(pg_wchar));
+//		wmasklen = pg_mb2wchar_with_len(tmask, wmask, masklen);
 
-		err = pg_regcomp(&(Affix->reg.regex), wmask, wmasklen,
-						 REG_ADVANCED | REG_NOSUB,
-						 DEFAULT_COLLATION_OID);
-		if (err)
-		{
-			char		errstr[100];
+//		err = pg_regcomp(&(Affix->reg.regex), wmask, wmasklen,
+//						 REG_ADVANCED | REG_NOSUB,
+//						 DEFAULT_COLLATION_OID);
+//		if (err)
+//		{
+//			char		errstr[100];
 
-			pg_regerror(err, &(Affix->reg.regex), errstr, sizeof(errstr));
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_REGULAR_EXPRESSION),
-					 errmsg("invalid regular expression: %s", errstr)));
-		}
+//			pg_regerror(err, &(Affix->reg.regex), errstr, sizeof(errstr));
+//			ereport(ERROR,
+//					(errcode(ERRCODE_INVALID_REGULAR_EXPRESSION),
+//					 errmsg("invalid regular expression: %s", errstr)));
+//		}
 	}
 
 	Affix->flagflags = flagflags;
@@ -748,15 +768,20 @@ NIAddAffix(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		if ((Affix->flagflags & FF_COMPOUNDFLAG) == 0)
 			Affix->flagflags |= FF_COMPOUNDFLAG;
 	}
-	Affix->flag = cpstrdup(Conf, flag);
+
 	Affix->type = type;
 
-	Affix->find = (find && *find) ? cpstrdup(Conf, find) : VoidString;
-	if ((Affix->replen = strlen(repl)) > 0)
-		Affix->repl = cpstrdup(Conf, repl);
-	else
-		Affix->repl = VoidString;
-	Conf->naffixes++;
+	Affix->replen = repllen;
+	if (repllen > 0)
+		StrNCpy(AffixFieldRepl(Affix), repl, repllen + 1);
+
+	Affix->findlen = findlen;
+	if (findlen > 0)
+		StrNCpy(AffixFieldFind(Affix), find, findlen + 1);
+
+	StrNCpy(AffixFieldFlag(Affix), flag, flaglen + 1);
+
+	ConfBuild->naffix++;
 }
 
 /* Parsing states for parse_affentry() and friends */
@@ -1989,16 +2014,16 @@ NISortAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild)
 			firstsuffix = i;
 
 		if ((Affix->flagflags & FF_COMPOUNDFLAG) && Affix->replen > 0 &&
-			isAffixInUse(Conf, Affix->flag))
+			isAffixInUse(Conf, AffixFieldFlag(Affix)))
 		{
 			if (ptr == Conf->CompoundAffix ||
 				ptr->issuffix != (ptr - 1)->issuffix ||
 				strbncmp((const unsigned char *) (ptr - 1)->affix,
-						 (const unsigned char *) Affix->repl,
+						 (const unsigned char *) AffixFieldRepl(Affix),
 						 (ptr - 1)->len))
 			{
 				/* leave only unique and minimals suffixes */
-				ptr->affix = Affix->repl;
+				ptr->affix = AffixFieldRepl(Affix);
 				ptr->len = Affix->replen;
 				ptr->issuffix = (Affix->type == FF_SUFFIX);
 				ptr++;
@@ -2100,7 +2125,7 @@ CheckAffix(const char *word, size_t len, AFFIX *Affix, int flagflags, char *neww
 	if (Affix->type == FF_SUFFIX)
 	{
 		strcpy(newword, word);
-		strcpy(newword + len - Affix->replen, Affix->find);
+		strcpy(newword + len - Affix->replen, AffixFieldFind(Affix));
 		if (baselen)			/* store length of non-changed part of word */
 			*baselen = len - Affix->replen;
 	}
@@ -2110,9 +2135,9 @@ CheckAffix(const char *word, size_t len, AFFIX *Affix, int flagflags, char *neww
 		 * if prefix is an all non-changed part's length then all word
 		 * contains only prefix and suffix, so out
 		 */
-		if (baselen && *baselen + strlen(Affix->find) <= Affix->replen)
+		if (baselen && *baselen + Affix->findlen <= Affix->replen)
 			return NULL;
-		strcpy(newword, Affix->find);
+		strcpy(newword, AffixFieldFind(Affix));
 		strcat(newword, word + Affix->replen);
 	}
 
@@ -2123,27 +2148,27 @@ CheckAffix(const char *word, size_t len, AFFIX *Affix, int flagflags, char *neww
 		return newword;
 	else if (Affix->isregis)
 	{
-		if (RS_execute(&(Affix->reg.regis), newword))
-			return newword;
+//		if (RS_execute(&(Affix->reg.regis), newword))
+//			return newword;
 	}
 	else
 	{
-		int			err;
-		pg_wchar   *data;
-		size_t		data_len;
-		int			newword_len;
+//		int			err;
+//		pg_wchar   *data;
+//		size_t		data_len;
+//		int			newword_len;
 
-		/* Convert data string to wide characters */
-		newword_len = strlen(newword);
-		data = (pg_wchar *) palloc((newword_len + 1) * sizeof(pg_wchar));
-		data_len = pg_mb2wchar_with_len(newword, data, newword_len);
+//		/* Convert data string to wide characters */
+//		newword_len = strlen(newword);
+//		data = (pg_wchar *) palloc((newword_len + 1) * sizeof(pg_wchar));
+//		data_len = pg_mb2wchar_with_len(newword, data, newword_len);
 
-		if (!(err = pg_regexec(&(Affix->reg.regex), data, data_len, 0, NULL, 0, NULL, 0)))
-		{
-			pfree(data);
-			return newword;
-		}
-		pfree(data);
+//		if (!(err = pg_regexec(&(Affix->reg.regex), data, data_len, 0, NULL, 0, NULL, 0)))
+//		{
+//			pfree(data);
+//			return newword;
+//		}
+//		pfree(data);
 	}
 
 	return NULL;
@@ -2209,7 +2234,7 @@ NormalizeSubWord(IspellDict *Conf, char *word, int flag)
 			if (CheckAffix(word, wrdlen, prefix->aff[j], flag, newword, NULL))
 			{
 				/* prefix success */
-				if (FindWord(Conf, newword, prefix->aff[j]->flag, flag))
+				if (FindWord(Conf, newword, AffixFieldFlag(prefix->aff[j]), flag))
 					cur += addToResult(forms, cur, newword);
 			}
 		}
@@ -2234,7 +2259,7 @@ NormalizeSubWord(IspellDict *Conf, char *word, int flag)
 			if (CheckAffix(word, wrdlen, suffix->aff[i], flag, newword, &baselen))
 			{
 				/* suffix success */
-				if (FindWord(Conf, newword, suffix->aff[i]->flag, flag))
+				if (FindWord(Conf, newword, AffixFieldFlag(suffix->aff[i]), flag))
 					cur += addToResult(forms, cur, newword);
 
 				/* now we will look changed word with prefixes */
@@ -2252,7 +2277,7 @@ NormalizeSubWord(IspellDict *Conf, char *word, int flag)
 						{
 							/* prefix success */
 							char	   *ff = (prefix->aff[j]->flagflags & suffix->aff[i]->flagflags & FF_CROSSPRODUCT) ?
-							VoidString : prefix->aff[j]->flag;
+							VoidString : AffixFieldFlag(prefix->aff[j]);
 
 							if (FindWord(Conf, pnewword, ff, flag))
 								cur += addToResult(forms, cur, pnewword);
