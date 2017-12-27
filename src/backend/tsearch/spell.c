@@ -92,6 +92,10 @@ NIStartBuild(IspellDictBuild *ConfBuild)
 	ConfBuild->buildCxt = AllocSetContextCreate(CurTransactionContext,
 											   "Ispell dictionary init context",
 												ALLOCSET_DEFAULT_SIZES);
+
+	/* Initially allocate 1MB for IspellDict */
+	ConfBuild->IspellDictSize = IspellDictHdrSize + 1024 * 1024;
+	ConfBuild->dict = tmpalloc(ConfBuild->IspellDictSize);
 }
 
 /*
@@ -304,8 +308,8 @@ strbncmp(const unsigned char *s1, const unsigned char *s2, size_t count)
 static int
 cmpaffix(const void *s1, const void *s2)
 {
-	const AFFIX *a1 = (const AFFIX *) s1;
-	const AFFIX *a2 = (const AFFIX *) s2;
+	const AFFIX *a1 = *((AFFIX *const *) s1);
+	const AFFIX *a2 = *((AFFIX *const *) s2);
 
 	if (a1->type < a2->type)
 		return -1;
@@ -316,6 +320,19 @@ cmpaffix(const void *s1, const void *s2)
 	else
 		return strbcmp((const unsigned char *) AffixFieldRepl(a1),
 					   (const unsigned char *) AffixFieldRepl(a2));
+}
+
+/*
+ * Add affix set of affix flags into IspellDict struct.  If IspellDict doesn't
+ * fit new affix set then resize it.
+ *
+ * ConfBuild: building structure for the current dictionary.
+ * AffixSet: set of affix flags.
+ */
+static void
+IspellDictAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet)
+{
+
 }
 
 /*
@@ -653,7 +670,6 @@ FindWord(IspellDict *Conf, const char *word, const char *affixflag, int flag)
 /*
  * Adds a new affix rule to the Affix field.
  *
- * Conf: current dictionary.
  * ConfBuild: building structure for the current dictionary, is used to allocate
  *			  temporary data.
  * flag: affix flag ('\' in the below example).
@@ -671,11 +687,11 @@ FindWord(IspellDict *Conf, const char *word, const char *affixflag, int flag)
  * type: FF_SUFFIX or FF_PREFIX.
  */
 static void
-NIAddAffix(IspellDict *Conf, IspellDictBuild *ConfBuild,
-		   const char *flag, char flagflags, const char *mask,
-		   const char *find, const char *repl, int type)
+NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
+		   const char *mask, const char *find, const char *repl, int type)
 {
 	AFFIX	   *Affix;
+	size_t		affixsize;
 	size_t		flaglen = strlen(flag);
 	size_t		findlen = strlen(find);
 	size_t		repllen = strlen(repl);
@@ -709,8 +725,8 @@ NIAddAffix(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		}
 	}
 
-	Affix = (AFFIX *) tmpalloc(AFFIXHDRSZ + flaglen + 1 +
-							   findlen + 1 + repllen + 1);
+	affixsize = AFFIXHDRSZ + flaglen + 1 + findlen + 1 + repllen + 1;
+	Affix = (AFFIX *) tmpalloc(affixsize);
 	ConfBuild->Affix[ConfBuild->naffix] = Affix;
 
 	/* This affix rule can be applied for words with any ending */
@@ -782,6 +798,7 @@ NIAddAffix(IspellDict *Conf, IspellDictBuild *ConfBuild,
 	StrNCpy(AffixFieldFlag(Affix), flag, flaglen + 1);
 
 	ConfBuild->naffix++;
+	ConfBuild->affixsize += affixsize;
 }
 
 /* Parsing states for parse_affentry() and friends */
@@ -1045,10 +1062,10 @@ parse_affentry(char *str, char *mask, char *find, char *repl)
  * Sets a Hunspell options depending on flag type.
  */
 static void
-setCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild,
-						  CompoundAffixFlag *entry, char *s, uint32 val)
+setCompoundAffixFlagValue(IspellDictBuild *ConfBuild, CompoundAffixFlag *entry,
+						  char *s, uint32 val)
 {
-	if (Conf->flagMode == FM_NUM)
+	if (ConfBuild->dict->flagMode == FM_NUM)
 	{
 		char	   *next;
 		int			i;
@@ -1068,21 +1085,19 @@ setCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild,
 	else
 		entry->flag.s = MemoryContextStrdup(ConfBuild->buildCxt, s);
 
-	entry->flagMode = Conf->flagMode;
+	entry->flagMode = ConfBuild->dict->flagMode;
 	entry->value = val;
 }
 
 /*
  * Sets up a correspondence for the affix parameter with the affix flag.
  *
- * Conf: current dictionary.
  * ConfBuild: building structure for the current dictionary.
  * s: affix flag in string.
  * val: affix parameter.
  */
 static void
-addCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild,
-						  char *s, uint32 val)
+addCompoundAffixFlagValue(IspellDictBuild *ConfBuild, char *s, uint32 val)
 {
 	CompoundAffixFlag *newValue;
 	char		sbuf[BUFSIZ];
@@ -1128,9 +1143,9 @@ addCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild,
 
 	newValue = ConfBuild->CompoundAffixFlags + ConfBuild->nCompoundAffixFlag;
 
-	setCompoundAffixFlagValue(Conf, ConfBuild, newValue, sbuf, val);
+	setCompoundAffixFlagValue(ConfBuild, newValue, sbuf, val);
 
-	Conf->usecompound = true;
+	ConfBuild->dict->usecompound = true;
 	ConfBuild->nCompoundAffixFlag++;
 }
 
@@ -1139,7 +1154,7 @@ addCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild,
  * flags s.
  */
 static int
-getCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild, char *s)
+getCompoundAffixFlagValue(IspellDictBuild *ConfBuild, char *s)
 {
 	uint32		flag = 0;
 	CompoundAffixFlag *found,
@@ -1153,8 +1168,8 @@ getCompoundAffixFlagValue(IspellDict *Conf, IspellDictBuild *ConfBuild, char *s)
 	flagcur = s;
 	while (*flagcur)
 	{
-		getNextFlagFromString(Conf, &flagcur, sflag);
-		setCompoundAffixFlagValue(Conf, ConfBuild, &key, sflag, 0);
+		getNextFlagFromString(ConfBuild->dict, &flagcur, sflag);
+		setCompoundAffixFlagValue(ConfBuild, &key, sflag, 0);
 
 		found = (CompoundAffixFlag *)
 			bsearch(&key, (void *) ConfBuild->CompoundAffixFlags,
@@ -1205,13 +1220,11 @@ getAffixFlagSet(IspellDict *Conf, char *s)
 /*
  * Import an affix file that follows MySpell or Hunspell format.
  *
- * Conf: current dictionary.
  * ConfBuild: building structure for the current dictionary.
  * filename: path to the .affix file.
  */
 static void
-NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
-				  const char *filename)
+NIImportOOAffixes(IspellDictBuild *ConfBuild, const char *filename)
 {
 	char		type[BUFSIZ],
 			   *ptype = NULL;
@@ -1231,9 +1244,9 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 	char	   *recoded;
 
 	/* read file to find any flag */
-	Conf->usecompound = false;
-	Conf->useFlagAliases = false;
-	Conf->flagMode = FM_CHAR;
+	ConfBuild->dict->usecompound = false;
+	ConfBuild->dict->useFlagAliases = false;
+	ConfBuild->dict->flagMode = FM_CHAR;
 
 	if (!tsearch_readline_begin(&trst, filename))
 		ereport(ERROR,
@@ -1250,36 +1263,36 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		}
 
 		if (STRNCMP(recoded, "COMPOUNDFLAG") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDFLAG"),
 									  FF_COMPOUNDFLAG);
 		else if (STRNCMP(recoded, "COMPOUNDBEGIN") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDBEGIN"),
 									  FF_COMPOUNDBEGIN);
 		else if (STRNCMP(recoded, "COMPOUNDLAST") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDLAST"),
 									  FF_COMPOUNDLAST);
 		/* COMPOUNDLAST and COMPOUNDEND are synonyms */
 		else if (STRNCMP(recoded, "COMPOUNDEND") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDEND"),
 									  FF_COMPOUNDLAST);
 		else if (STRNCMP(recoded, "COMPOUNDMIDDLE") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDMIDDLE"),
 									  FF_COMPOUNDMIDDLE);
 		else if (STRNCMP(recoded, "ONLYINCOMPOUND") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("ONLYINCOMPOUND"),
 									  FF_COMPOUNDONLY);
 		else if (STRNCMP(recoded, "COMPOUNDPERMITFLAG") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDPERMITFLAG"),
 									  FF_COMPOUNDPERMITFLAG);
 		else if (STRNCMP(recoded, "COMPOUNDFORBIDFLAG") == 0)
-			addCompoundAffixFlagValue(Conf, ConfBuild,
+			addCompoundAffixFlagValue(ConfBuild,
 									  recoded + strlen("COMPOUNDFORBIDFLAG"),
 									  FF_COMPOUNDFORBIDFLAG);
 		else if (STRNCMP(recoded, "FLAG") == 0)
@@ -1292,9 +1305,9 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 			if (*s)
 			{
 				if (STRNCMP(s, "long") == 0)
-					Conf->flagMode = FM_LONG;
+					ConfBuild->dict->flagMode = FM_LONG;
 				else if (STRNCMP(s, "num") == 0)
-					Conf->flagMode = FM_NUM;
+					ConfBuild->dict->flagMode = FM_NUM;
 				else if (STRNCMP(s, "default") != 0)
 					ereport(ERROR,
 							(errcode(ERRCODE_CONFIG_FILE_ERROR),
@@ -1335,9 +1348,9 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		if (STRNCMP(ptype, "af") == 0)
 		{
 			/* First line is the number of aliases */
-			if (!Conf->useFlagAliases)
+			if (!ConfBuild->dict->useFlagAliases)
 			{
-				Conf->useFlagAliases = true;
+				ConfBuild->dict->useFlagAliases = true;
 				naffix = atoi(sflag);
 				if (naffix == 0)
 					ereport(ERROR,
@@ -1372,8 +1385,8 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 
 		sflaglen = strlen(sflag);
 		if (sflaglen == 0
-			|| (sflaglen > 1 && Conf->flagMode == FM_CHAR)
-			|| (sflaglen > 2 && Conf->flagMode == FM_LONG))
+			|| (sflaglen > 1 && ConfBuild->dict->flagMode == FM_CHAR)
+			|| (sflaglen > 2 && ConfBuild->dict->flagMode == FM_LONG))
 			goto nextline;
 
 		/*--------
@@ -1401,7 +1414,7 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 
 			/* Get flags after '/' (flags are case sensitive) */
 			if ((ptr = strchr(repl, '/')) != NULL)
-				aflg |= getCompoundAffixFlagValue(Conf, ConfBuild,
+				aflg |= getCompoundAffixFlagValue(ConfBuild,
 												  getAffixFlagSet(Conf,
 																  ptr + 1));
 			/* Get lowercased version of string before '/' */
@@ -1415,8 +1428,7 @@ NIImportOOAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 			if (t_iseq(repl, '0'))
 				*prepl = '\0';
 
-			NIAddAffix(Conf, ConfBuild,
-					   sflag, flagflags | aflg, pmask, pfind, prepl,
+			NIAddAffix(ConfBuild, sflag, flagflags | aflg, pmask, pfind, prepl,
 					   isSuffix ? FF_SUFFIX : FF_PREFIX);
 			pfree(prepl);
 			pfree(pfind);
@@ -1442,8 +1454,7 @@ nextline:
  * work to NIImportOOAffixes(), which will re-read the whole file.
  */
 void
-NIImportAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
-				const char *filename)
+NIImportAffixes(IspellDictBuild *ConfBuild, const char *filename)
 {
 	char	   *pstr = NULL;
 	char		flag[BUFSIZ];
@@ -1464,9 +1475,9 @@ NIImportAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 				 errmsg("could not open affix file \"%s\": %m",
 						filename)));
 
-	Conf->usecompound = false;
-	Conf->useFlagAliases = false;
-	Conf->flagMode = FM_CHAR;
+	ConfBuild->dict->usecompound = false;
+	ConfBuild->dict->useFlagAliases = false;
+	ConfBuild->dict->flagMode = FM_CHAR;
 
 	while ((recoded = tsearch_readline(&trst)) != NULL)
 	{
@@ -1488,11 +1499,8 @@ NIImportAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 					s += pg_mblen(s);
 
 				if (*s && pg_mblen(s) == 1)
-				{
-					addCompoundAffixFlagValue(Conf, ConfBuild, s,
-											  FF_COMPOUNDFLAG);
-					Conf->usecompound = true;
-				}
+					addCompoundAffixFlagValue(ConfBuild, s, FF_COMPOUNDFLAG);
+
 				oldformat = true;
 				goto nextline;
 			}
@@ -1565,7 +1573,7 @@ NIImportAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		if (!parse_affentry(pstr, mask, find, repl))
 			goto nextline;
 
-		NIAddAffix(Conf, ConfBuild, flag, flagflags, mask, find, repl,
+		NIAddAffix(ConfBuild, flag, flagflags, mask, find, repl,
 				   suffixes ? FF_SUFFIX : FF_PREFIX);
 
 nextline:
@@ -1585,7 +1593,7 @@ isnewformat:
 				 errmsg("affix file contains both old-style and new-style commands")));
 	tsearch_readline_end(&trst);
 
-	NIImportOOAffixes(Conf, ConfBuild, filename);
+	NIImportOOAffixes(ConfBuild, filename);
 }
 
 /*
@@ -1743,7 +1751,7 @@ mkSPNode(IspellDict *Conf, IspellDictBuild *ConfBuild,
  * and affixes.
  */
 void
-NISortDictionary(IspellDict *Conf, IspellDictBuild *ConfBuild)
+NISortDictionary(IspellDictBuild *ConfBuild)
 {
 	int			i;
 	int			naffix = 0;
@@ -1988,28 +1996,29 @@ isAffixInUse(IspellDict *Conf, char *affixflag)
 }
 
 /*
- * Builds Conf->Prefix and Conf->Suffix trees from the imported affixes.
+ * Builds Prefix and Suffix trees from the imported affixes.
  */
 void
-NISortAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild)
+NISortAffixes(IspellDictBuild *ConfBuild)
 {
 	AFFIX	   *Affix;
 	size_t		i;
 	CMPDAffix  *ptr;
 	int			firstsuffix = Conf->naffixes;
 
-	if (Conf->naffixes == 0)
+	if (ConfBuild->naffix == 0)
 		return;
 
 	/* Store compound affixes in the Conf->CompoundAffix array */
-	if (Conf->naffixes > 1)
-		qsort((void *) Conf->Affix, Conf->naffixes, sizeof(AFFIX), cmpaffix);
+	if (ConfBuild->naffix > 1)
+		qsort((void *) ConfBuild->Affix, ConfBuild->naffix,
+			  sizeof(AFFIX *), cmpaffix);
 	Conf->CompoundAffix = ptr = (CMPDAffix *) palloc(sizeof(CMPDAffix) * Conf->naffixes);
 	ptr->affix = NULL;
 
-	for (i = 0; i < Conf->naffixes; i++)
+	for (i = 0; i < ConfBuild->naffix; i++)
 	{
-		Affix = &(((AFFIX *) Conf->Affix)[i]);
+		Affix = ConfBuild->Affix[i];
 		if (Affix->type == FF_SUFFIX && i < firstsuffix)
 			firstsuffix = i;
 

@@ -98,7 +98,7 @@ typedef struct aff_struct
 	uint8		findlen;
 
 	/*
-	 * fields stores the following data (each ends with 0):
+	 * fields stores the following data (each ends with \0):
 	 * - repl
 	 * - find
 	 * - flag - one character (if FM_CHAR),
@@ -202,6 +202,10 @@ typedef struct IspellDictBuild
 {
 	MemoryContext buildCxt;		/* temp context for construction */
 
+	IspellDict *dict;
+	/* Allocated size of IspellDict */
+	size_t		IspellDictSize;
+
 	/* Array of Hunspell options in affix file */
 	CompoundAffixFlag *CompoundAffixFlags;
 	/* number of entries in CompoundAffixFlags array */
@@ -218,7 +222,7 @@ typedef struct IspellDictBuild
 	AFFIX	  **Affix;
 	int			naffix;			/* number of valid entries in Affix array */
 	int			maffix;			/* allocated length of Affix array */
-	int			affixsize;		/* whole size of valid entries */
+	size_t		affixsize;		/* whole size of valid entries */
 } IspellDictBuild;
 
 typedef struct
@@ -244,6 +248,7 @@ typedef struct
 
 	/*
 	 * data stores:
+	 * - array of sets of affixes
 	 * - array of AFFIX
 	 */
 	char		data[FLEXIBLE_ARRAY_MEMBER];
@@ -254,12 +259,11 @@ typedef struct
 extern TSLexeme *NINormalizeWord(IspellDict *Conf, char *word);
 
 extern void NIStartBuild(IspellDictBuild *ConfBuild);
-extern void NIImportAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild,
-							const char *filename);
+extern void NIImportAffixes(IspellDictBuild *ConfBuild, const char *filename);
 extern void NIImportDictionary(IspellDictBuild *ConfBuild,
 							   const char *filename);
-extern void NISortDictionary(IspellDict *Conf, IspellDictBuild *ConfBuild);
-extern void NISortAffixes(IspellDict *Conf, IspellDictBuild *ConfBuild);
+extern void NISortDictionary(IspellDictBuild *ConfBuild);
+extern void NISortAffixes(IspellDictBuild *ConfBuild);
 extern void NIFinishBuild(IspellDictBuild *ConfBuild);
 
 #endif
