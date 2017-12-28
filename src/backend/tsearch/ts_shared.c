@@ -59,6 +59,7 @@ ispell_dsm_handle(const char *dictfile, const char *afffile,
 	StrNCpy(key.dictfile, dictfile, MAXPGPATH);
 	StrNCpy(key.afffile, afffile, MAXPGPATH);
 
+refind_entry:
 	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
 
 	entry = (TsearchDictEntry *) hash_search(dict_table, &key, HASH_FIND,
@@ -67,40 +68,35 @@ ispell_dsm_handle(const char *dictfile, const char *afffile,
 	/* Dictionary wasn't load into memory */
 	if (!found)
 	{
+		const void *ispell_dict;
+		Size		ispell_size;
+		dsm_segment *seg;
+
 		/* Try to get exclusive lock */
 		LWLockRelease(&tsearch_ctl->lock);
 		if (!LWLockAcquireOrWait(&tsearch_ctl->lock, LW_EXCLUSIVE))
 		{
 			/*
-			 * The lock was released by another backend, try to enter new
-			 * TsearchDictEntry.
+			 * The lock was released by another backend, try to refind an entry.
 			 */
+			goto refind_entry;
 		}
 
 		entry = (TsearchDictEntry *) hash_search(dict_table, &key, HASH_ENTER,
 												 &found);
-		if (found)
-		{
-			/* Other backend built the dictionary already */
-			res = entry->dict_dsm;
-		}
-		else
-		{
-			const void *ispell_dict;
-			Size		ispell_size;
-			dsm_segment *seg;
 
-			/* The lock was free so add new entry */
-			ispell_dict = allocate_cb(dictfile, afffile, &ispell_size);
+		Assert(!found);
 
-			seg = dsm_create(ispell_size, 0);
-			memcpy(dsm_segment_address(seg), ispell_dict, ispell_size);
+		/* The lock was free so add new entry */
+		ispell_dict = allocate_cb(dictfile, afffile, &ispell_size);
 
-			entry->dict_dsm = dsm_segment_handle(seg);
-			res = entry->dict_dsm;
+		seg = dsm_create(ispell_size, 0);
+		memcpy(dsm_segment_address(seg), ispell_dict, ispell_size);
 
-			dsm_detach(seg);
-		}
+		entry->dict_dsm = dsm_segment_handle(seg);
+		res = entry->dict_dsm;
+
+		dsm_detach(seg);
 	}
 	else
 		res = entry->dict_dsm;
