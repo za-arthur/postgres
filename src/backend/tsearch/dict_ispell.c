@@ -16,6 +16,7 @@
 #include "commands/defrem.h"
 #include "tsearch/dicts/spell.h"
 #include "tsearch/ts_locale.h"
+#include "tsearch/ts_shared.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
 
@@ -25,6 +26,17 @@ typedef struct
 	StopList	stoplist;
 	IspellDictBuild build;
 } DictISpell;
+
+static const void *
+dispell_build(const char *dictfile, const char *afffile, Size *size)
+{
+	char	   *buf;
+
+	buf = (char *) palloc0(10);
+	*size = 10;
+
+	return buf;
+}
 
 Datum
 dispell_init(PG_FUNCTION_ARGS)
@@ -39,6 +51,7 @@ dispell_init(PG_FUNCTION_ARGS)
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
 
 	NIStartBuild(&(d->build));
+	ispell_dsm_handle("test1","test2", dispell_build);
 
 	foreach(l, dictoptions)
 	{

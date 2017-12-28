@@ -17,6 +17,9 @@
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
 
+/* XXX should it be a GUC-variable? */
+#define NUM_DICTIONARIES	20
+
 typedef struct
 {
 	char		dictfile[MAXPGPATH];
@@ -31,75 +34,80 @@ typedef struct
 
 typedef struct
 {
-	dsa_handle	dsa_control;
-	HTAB	   *dict_table;
-	/* Concurently access to above fields */
 	LWLock		lock;
 } TsearchCtlData;
 
-static TsearchCtlData *TsearchCtl;
-
-static void *ispell_shmem_alloc(Size size);
+static TsearchCtlData *tsearch_ctl;
+static HTAB *dict_table;
 
 /*
  * Return handle to a dynamic shared memory.
  *
  * dictfile: .dict file of the dictionary.
  * afffile: .aff file of the dictionary.
+ * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  */
 dsm_handle
-ispell_dsm_handle(const char *dictfile, const char *afffile)
+ispell_dsm_handle(const char *dictfile, const char *afffile,
+				  ispell_build_callback allocate_cb)
 {
 	TsearchDictKey key;
 	TsearchDictEntry *entry;
 	bool		found;
 	dsm_handle	res;
 
-	LWLockAcquire(&TsearchCtl->lock, LW_EXCLUSIVE);
-
-	if (TsearchCtl->dsa_control == DSM_HANDLE_INVALID)
-	{
-		dsa_area   *dsa = dsa_create(LWTRANCHE_TSEARCH_DSA);
-		HASHCTL		ctl;
-		char		tabname[MAXPGPATH * 2 + 16];
-
-		TsearchCtl->dsa_control = dsa_get_handle(dsa);
-
-		memset(&ctl, 0, sizeof(ctl));
-		ctl.keysize = sizeof(TsearchDictKey);
-		ctl.entrysize = sizeof(TsearchDictEntry);
-		ctl.alloc = ispell_shmem_alloc;
-
-		snprintf(tabname, sizeof(tabname), "ispell hash: %s, %s",
-				 dictfile, afffile);
-		TsearchCtl->dict_table = hash_create(tabname, 8, &ctl,
-											 HASH_ELEM | HASH_ALLOC);
-	}
-
 	StrNCpy(key.dictfile, dictfile, MAXPGPATH);
 	StrNCpy(key.afffile, afffile, MAXPGPATH);
-	entry = (TsearchDictEntry *) hash_search(TsearchCtl->dict_table, &key,
-											 HASH_ENTER, &found);
-	res = entry->dict_dsm;
 
-	LWLockRelease(&TsearchCtl->lock);
+	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
+
+	entry = (TsearchDictEntry *) hash_search(dict_table, &key, HASH_FIND,
+											 &found);
+
+	/* Dictionary wasn't load into memory */
+	if (!found)
+	{
+		/* Try to get exclusive lock */
+		LWLockRelease(&tsearch_ctl->lock);
+		if (!LWLockAcquireOrWait(&tsearch_ctl->lock, LW_EXCLUSIVE))
+		{
+			/*
+			 * The lock was released by another backend, try to enter new
+			 * TsearchDictEntry.
+			 */
+		}
+
+		entry = (TsearchDictEntry *) hash_search(dict_table, &key, HASH_ENTER,
+												 &found);
+		if (found)
+		{
+			/* Other backend built the dictionary already */
+			res = entry->dict_dsm;
+		}
+		else
+		{
+			const void *ispell_dict;
+			Size		ispell_size;
+			dsm_segment *seg;
+
+			/* The lock was free so add new entry */
+			ispell_dict = allocate_cb(dictfile, afffile, &ispell_size);
+
+			seg = dsm_create(ispell_size, 0);
+			memcpy(dsm_segment_address(seg), ispell_dict, ispell_size);
+
+			entry->dict_dsm = dsm_segment_handle(seg);
+			res = entry->dict_dsm;
+
+			dsm_detach(seg);
+		}
+	}
+	else
+		res = entry->dict_dsm;
+
+	LWLockRelease(&tsearch_ctl->lock);
 
 	return res;
-}
-
-/*
- * Allocate chunk from dynamic shared memory pointed by TsearchCtl->dsa_control.
- */
-static void *
-ispell_shmem_alloc(Size size)
-{
-	dsa_area   *dsa;
-	dsa_pointer ptr;
-
-	dsa = dsa_attach(TsearchCtl->dsa_control);
-	ptr = dsa_allocate(dsa, size);
-
-	return dsa_get_address(dsa, ptr);
 }
 
 /*
@@ -108,17 +116,23 @@ ispell_shmem_alloc(Size size)
 void
 TsearchShmemInit(void)
 {
+	HASHCTL		ctl;
 	bool		found;
 
-	TsearchCtl = (TsearchCtlData *)
+	tsearch_ctl = (TsearchCtlData *)
 		ShmemInitStruct("Full Text Search Ctl", TsearchShmemSize(), &found);
 
 	if (!found)
-	{
-		TsearchCtl->dsa_control = DSM_HANDLE_INVALID;
-		TsearchCtl->dict_table = NULL;
-		LWLockInitialize(&TsearchCtl->lock, LWTRANCHE_TSEARCH_DSA);
-	}
+		LWLockInitialize(&tsearch_ctl->lock, LWTRANCHE_TSEARCH_DSA);
+
+	memset(&ctl, 0, sizeof(ctl));
+	ctl.keysize = sizeof(TsearchDictKey);
+	ctl.entrysize = sizeof(TsearchDictEntry);
+
+	dict_table = ShmemInitHash("Shared Tsearch Lookup Table",
+							   NUM_DICTIONARIES, NUM_DICTIONARIES,
+							   &ctl,
+							   HASH_ELEM | HASH_BLOBS);
 }
 
 /*
@@ -129,7 +143,12 @@ TsearchShmemSize(void)
 {
 	Size		size = 0;
 
-	size = add_size(size, sizeof(TsearchCtlData));
+	/* size of service structure */
+	size = add_size(size, MAXALIGN(sizeof(TsearchCtlData)));
+
+	/* size of lookup hash table */
+	size = add_size(size, hash_estimate_size(NUM_DICTIONARIES,
+											 sizeof(TsearchDictEntry)));
 
 	return size;
 }
