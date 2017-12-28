@@ -194,6 +194,24 @@ typedef struct CompoundAffixFlag
 #define FLAGNUM_MAXSIZE		(1 << 16)
 
 /*
+ * Stores array of affix sets.
+ */
+typedef struct AffixSetsData
+{
+	/* Number of affix sets */
+	int			length;
+	/* Allocated number of affix sets */
+	int			allocated;
+	uint32	   *offset;
+	/* Allocated size of AffixSetsData */
+	size_t		size;
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+} AffixSetsData;
+
+#define AffixSetsDataHdrSize	(offsetof(AffixSetsData, data))
+#define AffixSetsGet(as, i)		((as)->data + (as)->offset[i])
+
+/*
  * IspellDictBuild is used to initialize IspellDict struct.  This is a
  * temprorary structure which is setup by NIStartBuild() and released by
  * NIFinishBuild().
@@ -203,8 +221,6 @@ typedef struct IspellDictBuild
 	MemoryContext buildCxt;		/* temp context for construction */
 
 	IspellDict *dict;
-	/* Allocated size of IspellDict */
-	size_t		IspellDictSize;
 
 	/* Array of Hunspell options in affix file */
 	CompoundAffixFlag *CompoundAffixFlags;
@@ -223,10 +239,16 @@ typedef struct IspellDictBuild
 	int			naffix;			/* number of valid entries in Affix array */
 	int			maffix;			/* allocated length of Affix array */
 	size_t		affixsize;		/* whole size of valid entries */
+
+	/* Array of affix sets */
+	AffixSetsData *AffixData;
 } IspellDictBuild;
 
 typedef struct
 {
+	/* Allocated size of IspellDict */
+	size_t		size;
+
 	AffixNode  *Suffix;
 	AffixNode  *Prefix;
 
