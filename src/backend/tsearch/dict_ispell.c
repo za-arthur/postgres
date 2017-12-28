@@ -50,7 +50,7 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
 
-	ispell_dsm_handle("test1","test2", dispell_build);
+	ispell_shmem_location("test1","test2", dispell_build);
 
 	NIStartBuild(&(d->obj));
 

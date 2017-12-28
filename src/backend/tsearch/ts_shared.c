@@ -13,6 +13,7 @@
  */
 #include "postgres.h"
 
+#include "storage/dsm.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
@@ -47,14 +48,15 @@ static HTAB *dict_table;
  * afffile: .aff file of the dictionary.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  */
-dsm_handle
-ispell_dsm_handle(const char *dictfile, const char *afffile,
-				  ispell_build_callback allocate_cb)
+void *
+ispell_shmem_location(const char *dictfile, const char *afffile,
+					  ispell_build_callback allocate_cb)
 {
 	TsearchDictKey key;
 	TsearchDictEntry *entry;
 	bool		found;
-	dsm_handle	res;
+	dsm_segment *seg;
+	void	   *res;
 
 	StrNCpy(key.dictfile, dictfile, MAXPGPATH);
 	StrNCpy(key.afffile, afffile, MAXPGPATH);
@@ -70,7 +72,6 @@ refind_entry:
 	{
 		const void *ispell_dict;
 		Size		ispell_size;
-		dsm_segment *seg;
 
 		/* Try to get exclusive lock */
 		LWLockRelease(&tsearch_ctl->lock);
@@ -91,15 +92,23 @@ refind_entry:
 		ispell_dict = allocate_cb(dictfile, afffile, &ispell_size);
 
 		seg = dsm_create(ispell_size, 0);
-		memcpy(dsm_segment_address(seg), ispell_dict, ispell_size);
+		res = dsm_segment_address(seg);
+		memcpy(res, ispell_dict, ispell_size);
 
 		entry->dict_dsm = dsm_segment_handle(seg);
-		res = entry->dict_dsm;
+
+		/* Remain attached until end of postmaster */
+		dsm_pin_segment(seg);
 
 		dsm_detach(seg);
 	}
 	else
-		res = entry->dict_dsm;
+	{
+		seg = dsm_attach(entry->dict_dsm);
+		res = dsm_segment_address(seg);
+
+		dsm_detach(seg);
+	}
 
 	LWLockRelease(&tsearch_ctl->lock);
 
