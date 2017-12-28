@@ -382,7 +382,7 @@ NIBuildAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
 
 	StrNCpy(AffixSetsGet(AffixData, AffixData->length),
 			AffixSet, AffixSetLen + 1);
-	/* Save offset of the end of the data */
+	/* Save offset of the end of data */
 	AffixData->offset[AffixData->length + 1] =
 		AffixData->offset[AffixData->length] + AffixSetLen + 1;
 	AffixData->length++;
@@ -1644,19 +1644,20 @@ isnewformat:
 
 /*
  * Merges two affix flag sets and stores a new affix flag set into
- * Conf->AffixData.
+ * ConfBuild->AffixData.
  *
  * Returns index of a new affix flag set.
  */
 static int
-MergeAffix(IspellDict *Conf, int a1, int a2)
+MergeAffix(IspellDictBuild *ConfBuild, int a1, int a2)
 {
-	char	  **ptr;
+	char	   *ptr;
+	size_t		len;
 
 	/* Do not merge affix flags if one of affix flags is empty */
-	if (*Conf->AffixData[a1] == '\0')
+	if (*AffixSetsGet(ConfBuild->AffixData, a1) == '\0')
 		return a2;
-	else if (*Conf->AffixData[a2] == '\0')
+	else if (*AffixSetsGet(ConfBuild->AffixData, a2) == '\0')
 		return a1;
 
 	while (Conf->nAffixData + 1 >= Conf->lenAffixData)
@@ -1666,13 +1667,12 @@ MergeAffix(IspellDict *Conf, int a1, int a2)
 											 sizeof(char *) * Conf->lenAffixData);
 	}
 
-	ptr = Conf->AffixData + Conf->nAffixData;
 	if (Conf->flagMode == FM_NUM)
 	{
-		*ptr = cpalloc(strlen(Conf->AffixData[a1]) +
-					   strlen(Conf->AffixData[a2]) +
-					   1 /* comma */ + 1 /* \0 */ );
-		sprintf(*ptr, "%s,%s", Conf->AffixData[a1], Conf->AffixData[a2]);
+		len = strlen(Conf->AffixData[a1]) + strlen(Conf->AffixData[a2]) +
+			1 /* comma */;
+		ptr = tmpalloc(len + 1 /* \0 */);
+		sprintf(ptr, "%s,%s", Conf->AffixData[a1], Conf->AffixData[a2]);
 	}
 	else
 	{
@@ -1685,7 +1685,7 @@ MergeAffix(IspellDict *Conf, int a1, int a2)
 	*ptr = NULL;
 	Conf->nAffixData++;
 
-	return Conf->nAffixData - 1;
+	return ConfBuild->AffixData->length - 1;
 }
 
 /*
@@ -1697,7 +1697,7 @@ makeCompoundFlags(IspellDict *Conf, IspellDictBuild *ConfBuild, int affix)
 {
 	char	   *str = Conf->AffixData[affix];
 
-	return (getCompoundAffixFlagValue(Conf, ConfBuild, str) & FF_COMPOUNDFLAGMASK);
+	return (getCompoundAffixFlagValue(ConfBuild, str) & FF_COMPOUNDFLAGMASK);
 }
 
 /*
