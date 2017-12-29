@@ -95,9 +95,12 @@ NIStartBuild(IspellDictBuild *ConfBuild)
 											   "Ispell dictionary init context",
 												ALLOCSET_DEFAULT_SIZES);
 
-	/* Initially allocate 2MB for IspellDictData */
+	/*
+	 * Allocate buffer for the dictionary in current context not in buildCxt.
+	 * Initially allocate 2MB for IspellDictData.
+	 */
 	dict_size = IspellDictDataHdrSize + 2 * 1024 * 1024;
-	ConfBuild->dict = tmpalloc(dict_size);
+	ConfBuild->dict = palloc(dict_size);
 	ConfBuild->dict_size = dict_size;
 }
 
@@ -392,7 +395,7 @@ NIBuildAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
  * - 2 characters (FM_LONG). A character may be Unicode.
  * - numbers from 1 to 65000 (FM_NUM).
  *
- * Depending on the flagMode an affix string can have the following format:
+ * Depending on the flagmode an affix string can have the following format:
  * - FM_CHAR: ABCD
  *	 Here we have 4 flags: A, B, C and D
  * - FM_LONG: ABCDE*
@@ -400,13 +403,13 @@ NIBuildAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
  * - FM_NUM: 200,205,50
  *	 Here we have 3 flags: 200, 205 and 50
  *
- * Conf: current dictionary.
+ * flagmode: flag mode of the dictionary
  * sflagset: the set of affix flags. Returns a reference to the start of a next
  *			 affix flag.
  * sflag: returns an affix flag from sflagset.
  */
 static void
-getNextFlagFromString(IspellDict *Conf, char **sflagset, char *sflag)
+getNextFlagFromString(FlagMode *flagmode, char **sflagset, char *sflag)
 {
 	int32		s;
 	char	   *next,
@@ -415,11 +418,11 @@ getNextFlagFromString(IspellDict *Conf, char **sflagset, char *sflag)
 	bool		stop = false;
 	bool		met_comma = false;
 
-	maxstep = (Conf->flagMode == FM_LONG) ? 2 : 1;
+	maxstep = (flagmode == FM_LONG) ? 2 : 1;
 
 	while (**sflagset)
 	{
-		switch (Conf->flagMode)
+		switch (flagmode)
 		{
 			case FM_LONG:
 			case FM_CHAR:
@@ -481,15 +484,15 @@ getNextFlagFromString(IspellDict *Conf, char **sflagset, char *sflag)
 				stop = true;
 				break;
 			default:
-				elog(ERROR, "unrecognized type of Conf->flagMode: %d",
-					 Conf->flagMode);
+				elog(ERROR, "unrecognized type of flagmode: %d",
+					 flagmode);
 		}
 
 		if (stop)
 			break;
 	}
 
-	if (Conf->flagMode == FM_LONG && maxstep > 0)
+	if (flagmode == FM_LONG && maxstep > 0)
 		ereport(ERROR,
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
 				 errmsg("invalid affix flag \"%s\" with \"long\" flag value",
@@ -523,7 +526,7 @@ IsAffixFlagInUse(IspellDict *Conf, int affix, const char *affixflag)
 
 	while (*flagcur)
 	{
-		getNextFlagFromString(Conf, &flagcur, flag);
+		getNextFlagFromString(Conf->flagMode, &flagcur, flag);
 		/* Compare first affix flag in flagcur with affixflag */
 		if (strcmp(flag, affixflag) == 0)
 			return true;
@@ -1217,7 +1220,7 @@ getCompoundAffixFlagValue(IspellDictBuild *ConfBuild, char *s)
 	flagcur = s;
 	while (*flagcur)
 	{
-		getNextFlagFromString(ConfBuild->dict, &flagcur, sflag);
+		getNextFlagFromString(ConfBuild->dict->flagMode, &flagcur, sflag);
 		setCompoundAffixFlagValue(ConfBuild, &key, sflag, 0);
 
 		found = (CompoundAffixFlag *)
@@ -1234,14 +1237,13 @@ getCompoundAffixFlagValue(IspellDictBuild *ConfBuild, char *s)
 /*
  * Returns a flag set using the s parameter.
  *
- * If Conf->useFlagAliases is true then the s parameter is index of the
- * Conf->AffixData array and function returns its entry.
- * Else function returns the s parameter.
+ * If useFlagAliases is true then the s parameter is index of the AffixData
+ * array and function returns its entry.  Else function returns the s parameter.
  */
 static char *
-getAffixFlagSet(IspellDict *Conf, char *s)
+getAffixFlagSet(IspellDictBuild *ConfBuild, char *s)
 {
-	if (Conf->useFlagAliases && *s != '\0')
+	if (ConfBuild->dict->useFlagAliases && *s != '\0')
 	{
 		int			curaffix;
 		char	   *end;
@@ -1252,13 +1254,13 @@ getAffixFlagSet(IspellDict *Conf, char *s)
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
 					 errmsg("invalid affix alias \"%s\"", s)));
 
-		if (curaffix > 0 && curaffix <= Conf->nAffixData)
+		if (curaffix > 0 && curaffix <= ConfBuild->nAffixData)
 
 			/*
 			 * Do not subtract 1 from curaffix because empty string was added
 			 * in NIImportOOAffixes
 			 */
-			return Conf->AffixData[curaffix];
+			return AffixDataGet(ConfBuild, curaffix);
 		else
 			return VoidString;
 	}

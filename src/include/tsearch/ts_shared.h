@@ -15,11 +15,13 @@
 
 #include "c.h"
 
-typedef const void *(*ispell_build_callback) (const char *dictfile,
+typedef const void *(*ispell_build_callback) (void *dictbuild,
+											  const char *dictfile,
 											  const char *afffile,
 											  Size *size);
 
-extern void *ispell_shmem_location(const char *dictfile, const char *afffile,
+extern void *ispell_shmem_location(void *dictbuild,
+								   const char *dictfile, const char *afffile,
 								   ispell_build_callback allocate_cb);
 
 extern void TsearchShmemInit(void);

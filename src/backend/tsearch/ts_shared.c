@@ -44,12 +44,14 @@ static HTAB *dict_table;
 /*
  * Return handle to a dynamic shared memory.
  *
+ * dictbuild: building structure for the dictionary.
  * dictfile: .dict file of the dictionary.
  * afffile: .aff file of the dictionary.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  */
 void *
-ispell_shmem_location(const char *dictfile, const char *afffile,
+ispell_shmem_location(void *dictbuild,
+					  const char *dictfile, const char *afffile,
 					  ispell_build_callback allocate_cb)
 {
 	TsearchDictKey key;
@@ -89,11 +91,13 @@ refind_entry:
 		Assert(!found);
 
 		/* The lock was free so add new entry */
-		ispell_dict = allocate_cb(dictfile, afffile, &ispell_size);
+		ispell_dict = allocate_cb(dictbuild, dictfile, afffile, &ispell_size);
 
 		seg = dsm_create(ispell_size, 0);
 		res = dsm_segment_address(seg);
 		memcpy(res, ispell_dict, ispell_size);
+
+		pfree(ispell_dict);
 
 		entry->dict_dsm = dsm_segment_handle(seg);
 
