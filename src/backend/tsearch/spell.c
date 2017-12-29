@@ -76,7 +76,6 @@
  * in the ConfBuild->buildCxt context.
  */
 #define tmpalloc(sz)  MemoryContextAlloc(ConfBuild->buildCxt, (sz))
-#define tmpalloc0(sz) MemoryContextAllocZero(ConfBuild->buildCxt, (sz))
 
 /*
  * Prepare for constructing an ISpell dictionary.
@@ -96,10 +95,10 @@ NIStartBuild(IspellDictBuild *ConfBuild)
 											   "Ispell dictionary init context",
 												ALLOCSET_DEFAULT_SIZES);
 
-	/* Initially allocate 2MB for IspellDict */
-	dict_size = IspellDictHdrSize + 2 * 1024 * 1024;
+	/* Initially allocate 2MB for IspellDictData */
+	dict_size = IspellDictDataHdrSize + 2 * 1024 * 1024;
 	ConfBuild->dict = tmpalloc(dict_size);
-	ConfBuild->dict->size = dict_size;
+	ConfBuild->dict_size = dict_size;
 }
 
 /*
@@ -334,13 +333,16 @@ NIBuildInitAffixData(IspellDictBuild *ConfBuild, int numAffixData)
 {
 	size_t		size;
 
-	size = AffixSetsDataHdrSize + 8 * 1024 /* Reserve 8KB for data */;
+	size = 8 * 1024 /* Reserve 8KB for data */;
 
-	ConfBuild->AffixData = tmpalloc(size);
-	ConfBuild->AffixData->size = size;
-	ConfBuild->AffixData->offset = tmpalloc0(numAffixData * sizeof(uint32));
-	ConfBuild->AffixData->length = 0;
-	ConfBuild->AffixData->allocated = numAffixData;
+	ConfBuild->AffixData = (char *) tmpalloc(size);
+	ConfBuild->AffixDataSize = size;
+	ConfBuild->AffixDataOffset = tmpalloc(numAffixData * sizeof(uint32));
+	ConfBuild->nAffixData = 0;
+	ConfBuild->mAffixData= numAffixData;
+
+	/* Save offset of the end of data */
+	ConfBuild->AffixDataEnd = 0;
 }
 
 /*
@@ -354,38 +356,32 @@ static void
 NIBuildAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
 				   size_t AffixSetLen)
 {
-	AffixSetsData *AffixData = ConfBuild->AffixData;
-
 	/*
 	 * Check available space for AffixSet.
-	 * Last offset is end of data.
 	 */
-	if (AffixData->offset[AffixData->length] + AffixSetLen + 1 /* \0 */ >
-		AffixData->size - AffixSetsDataHdrSize)
+	if (ConfBuild->AffixDataEnd + AffixSetLen + 1 /* \0 */ >
+		ConfBuild->AffixDataSize)
 	{
-		size_t		newsize = Max(AffixData->size + 8 * 1024 /* 8KB */,
-								  AffixData->size + AffixSetLen + 1);
+		size_t		newsize = Max(ConfBuild->AffixDataSize + 8 * 1024 /* 8KB */,
+								  ConfBuild->AffixDataSize + AffixSetLen + 1);
 
 		ConfBuild->AffixData = repalloc(ConfBuild->AffixData, newsize);
-		ConfBuild->AffixData->size = newsize;
-
-		AffixData = ConfBuild->AffixData;
+		ConfBuild->AffixDataSize = newsize;
 	}
 
 	/* Check available number of offsets */
-	if (AffixData->length + 1 >= AffixData->allocated)
+	if (ConfBuild->nAffixData >= ConfBuild->mAffixData)
 	{
-		AffixData->allocated *= 2;
-		AffixData->offset = (uint32 *) repalloc(AffixData->offset,
-												 sizeof(uint32) * AffixData->allocated);
+		ConfBuild->mAffixData *= 2;
+		ConfBuild->AffixDataOffset = (uint32 *) repalloc(ConfBuild->AffixDataOffset,
+														 sizeof(uint32) * ConfBuild->mAffixData);
 	}
 
-	StrNCpy(AffixSetsGet(AffixData, AffixData->length),
+	StrNCpy(AffixDataGet(ConfBuild, ConfBuild->nAffixData),
 			AffixSet, AffixSetLen + 1);
 	/* Save offset of the end of data */
-	AffixData->offset[AffixData->length + 1] =
-		AffixData->offset[AffixData->length] + AffixSetLen + 1;
-	AffixData->length++;
+	ConfBuild->AffixDataEnd += AffixSetLen + 1;
+	ConfBuild->nAffixData++;
 }
 
 /*
@@ -547,27 +543,27 @@ IsAffixFlagInUse(IspellDict *Conf, int affix, const char *affixflag)
 static void
 NIAddSpell(IspellDictBuild *ConfBuild, const char *word, const char *flag)
 {
-	if (ConfBuild->nspell >= ConfBuild->mspell)
+	if (ConfBuild->nSpell >= ConfBuild->mSpell)
 	{
-		if (ConfBuild->mspell)
+		if (ConfBuild->mSpell)
 		{
-			ConfBuild->mspell *= 2;
+			ConfBuild->mSpell *= 2;
 			ConfBuild->Spell = (SPELL **) repalloc(ConfBuild->Spell,
-												   ConfBuild->mspell * sizeof(SPELL *));
+												   ConfBuild->mSpell * sizeof(SPELL *));
 		}
 		else
 		{
-			ConfBuild->mspell = 1024 * 20;
-			ConfBuild->Spell = (SPELL **) tmpalloc(ConfBuild->mspell * sizeof(SPELL *));
+			ConfBuild->mSpell = 1024 * 20;
+			ConfBuild->Spell = (SPELL **) tmpalloc(ConfBuild->mSpell * sizeof(SPELL *));
 		}
 	}
-	ConfBuild->Spell[ConfBuild->nspell] =
+	ConfBuild->Spell[ConfBuild->nSpell] =
 		(SPELL *) tmpalloc(SPELLHDRSZ + strlen(word) + 1);
-	strcpy(ConfBuild->Spell[ConfBuild->nspell]->word, word);
-	ConfBuild->Spell[ConfBuild->nspell]->p.flag = (*flag != '\0')
+	strcpy(ConfBuild->Spell[ConfBuild->nSpell]->word, word);
+	ConfBuild->Spell[ConfBuild->nSpell]->p.flag = (*flag != '\0')
 		? MemoryContextStrdup(ConfBuild->buildCxt, flag) : VoidString;
 
-	ConfBuild->nspell++;
+	ConfBuild->nSpell++;
 }
 
 /*
@@ -763,24 +759,24 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
 				 errmsg("affix repl field \"%s\" too long", repl)));
 
-	if (ConfBuild->naffix >= ConfBuild->maffix)
+	if (ConfBuild->nAffix >= ConfBuild->mAffix)
 	{
-		if (ConfBuild->maffix)
+		if (ConfBuild->mAffix)
 		{
-			ConfBuild->maffix *= 2;
+			ConfBuild->mAffix *= 2;
 			ConfBuild->Affix = (AFFIX **) repalloc(ConfBuild->Affix,
-												   ConfBuild->maffix * sizeof(AFFIX *));
+												   ConfBuild->mAffix * sizeof(AFFIX *));
 		}
 		else
 		{
-			ConfBuild->maffix = 255;
-			ConfBuild->Affix = (AFFIX **) tmpalloc(ConfBuild->maffix * sizeof(AFFIX *));
+			ConfBuild->mAffix = 255;
+			ConfBuild->Affix = (AFFIX **) tmpalloc(ConfBuild->mAffix * sizeof(AFFIX *));
 		}
 	}
 
 	affixsize = AFFIXHDRSZ + flaglen + 1 + findlen + 1 + repllen + 1;
 	Affix = (AFFIX *) tmpalloc(affixsize);
-	ConfBuild->Affix[ConfBuild->naffix] = Affix;
+	ConfBuild->Affix[ConfBuild->nAffix] = Affix;
 
 	/* This affix rule can be applied for words with any ending */
 	if (strcmp(mask, ".") == 0 || *mask == '\0')
@@ -850,8 +846,8 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 
 	StrNCpy(AffixFieldFlag(Affix), flag, flaglen + 1);
 
-	ConfBuild->naffix++;
-	ConfBuild->affixsize += affixsize;
+	ConfBuild->nAffix++;
+//	ConfBuild->AffixSize += affixsize;
 }
 
 /* Parsing states for parse_affentry() and friends */
@@ -1655,17 +1651,10 @@ MergeAffix(IspellDictBuild *ConfBuild, int a1, int a2)
 	size_t		len;
 
 	/* Do not merge affix flags if one of affix flags is empty */
-	if (*AffixSetsGet(ConfBuild->AffixData, a1) == '\0')
+	if (*AffixDataGet(ConfBuild, a1) == '\0')
 		return a2;
-	else if (*AffixSetsGet(ConfBuild->AffixData, a2) == '\0')
+	else if (*AffixDataGet(ConfBuild, a2) == '\0')
 		return a1;
-
-	while (Conf->nAffixData + 1 >= Conf->lenAffixData)
-	{
-		Conf->lenAffixData *= 2;
-		Conf->AffixData = (char **) repalloc(Conf->AffixData,
-											 sizeof(char *) * Conf->lenAffixData);
-	}
 
 	if (Conf->flagMode == FM_NUM)
 	{
@@ -1676,14 +1665,13 @@ MergeAffix(IspellDictBuild *ConfBuild, int a1, int a2)
 	}
 	else
 	{
-		*ptr = cpalloc(strlen(Conf->AffixData[a1]) +
-					   strlen(Conf->AffixData[a2]) +
-					   1 /* \0 */ );
-		sprintf(*ptr, "%s%s", Conf->AffixData[a1], Conf->AffixData[a2]);
+		len = strlen(Conf->AffixData[a1]) + strlen(Conf->AffixData[a2]);
+		ptr = tmpalloc(len + 1 /* \0 */ );
+		sprintf(ptr, "%s%s", Conf->AffixData[a1], Conf->AffixData[a2]);
 	}
-	ptr++;
-	*ptr = NULL;
-	Conf->nAffixData++;
+
+	NIBuildAddAffixSet(ConfBuild, ptr, len);
+	pfree(ptr);
 
 	return ConfBuild->AffixData->length - 1;
 }
@@ -1811,7 +1799,7 @@ NISortDictionary(IspellDictBuild *ConfBuild)
 	 */
 	if (Conf->useFlagAliases)
 	{
-		for (i = 0; i < ConfBuild->nspell; i++)
+		for (i = 0; i < ConfBuild->nSpell; i++)
 		{
 			char	   *end;
 
@@ -1841,11 +1829,11 @@ NISortDictionary(IspellDictBuild *ConfBuild)
 	else
 	{
 		/* Count the number of different flags used in the dictionary */
-		qsort((void *) ConfBuild->Spell, ConfBuild->nspell, sizeof(SPELL *),
+		qsort((void *) ConfBuild->Spell, ConfBuild->nSpell, sizeof(SPELL *),
 			  cmpspellaffix);
 
 		naffix = 0;
-		for (i = 0; i < ConfBuild->nspell; i++)
+		for (i = 0; i < ConfBuild->nSpell; i++)
 		{
 			if (i == 0
 				|| strcmp(ConfBuild->Spell[i]->p.flag,
@@ -1861,11 +1849,11 @@ NISortDictionary(IspellDictBuild *ConfBuild)
 		NIBuildInitAffixData(ConfBuild, naffix);
 
 		curaffix = -1;
-		for (i = 0; i < ConfBuild->nspell; i++)
+		for (i = 0; i < ConfBuild->nSpell; i++)
 		{
 			if (i == 0
 				|| strcmp(ConfBuild->Spell[i]->p.flag,
-						  AffixSetsGet(Conf->AffixData, curaffix)))
+						  AffixDataGet(ConfBuild, curaffix)))
 			{
 				curaffix++;
 				Assert(curaffix < naffix);
@@ -1879,8 +1867,8 @@ NISortDictionary(IspellDictBuild *ConfBuild)
 	}
 
 	/* Start build a prefix tree */
-	qsort((void *) ConfBuild->Spell, ConfBuild->nspell, sizeof(SPELL *), cmpspell);
-	Conf->Dictionary = mkSPNode(Conf, ConfBuild, 0, ConfBuild->nspell, 0);
+	qsort((void *) ConfBuild->Spell, ConfBuild->nSpell, sizeof(SPELL *), cmpspell);
+	Conf->Dictionary = mkSPNode(Conf, ConfBuild, 0, ConfBuild->nSpell, 0);
 }
 
 /*
@@ -2051,17 +2039,17 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 	CMPDAffix  *ptr;
 	int			firstsuffix = Conf->naffixes;
 
-	if (ConfBuild->naffix == 0)
+	if (ConfBuild->nAffix == 0)
 		return;
 
 	/* Store compound affixes in the Conf->CompoundAffix array */
-	if (ConfBuild->naffix > 1)
-		qsort((void *) ConfBuild->Affix, ConfBuild->naffix,
+	if (ConfBuild->nAffix > 1)
+		qsort((void *) ConfBuild->Affix, ConfBuild->nAffix,
 			  sizeof(AFFIX *), cmpaffix);
 	Conf->CompoundAffix = ptr = (CMPDAffix *) palloc(sizeof(CMPDAffix) * Conf->naffixes);
 	ptr->affix = NULL;
 
-	for (i = 0; i < ConfBuild->naffix; i++)
+	for (i = 0; i < ConfBuild->nAffix; i++)
 	{
 		Affix = ConfBuild->Affix[i];
 		if (Affix->type == FF_SUFFIX && i < firstsuffix)
