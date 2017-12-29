@@ -85,7 +85,7 @@
 void
 NIStartBuild(IspellDictBuild *ConfBuild)
 {
-	size_t		dict_size;
+	uint32		dict_size;
 
 	/*
 	 * The temp context is a child of CurTransactionContext, so that it will
@@ -334,7 +334,7 @@ cmpaffix(const void *s1, const void *s2)
 static void
 NIBuildInitAffixData(IspellDictBuild *ConfBuild, int numAffixData)
 {
-	size_t		size;
+	uint32		size;
 
 	size = 8 * 1024 /* Reserve 8KB for data */;
 
@@ -357,18 +357,18 @@ NIBuildInitAffixData(IspellDictBuild *ConfBuild, int numAffixData)
  */
 static void
 NIBuildAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
-				   size_t AffixSetLen)
+				   uint32 AffixSetLen)
 {
 	/*
 	 * Check available space for AffixSet.
 	 */
-	if (ConfBuild->AffixDataEnd + AffixSetLen + 1 /* \0 */ >
+	if (ConfBuild->AffixDataEnd + AffixSetLen + 1 /* \0 */ >=
 		ConfBuild->AffixDataSize)
 	{
-		size_t		newsize = Max(ConfBuild->AffixDataSize + 8 * 1024 /* 8KB */,
+		uint32		newsize = Max(ConfBuild->AffixDataSize + 8 * 1024 /* 8KB */,
 								  ConfBuild->AffixDataSize + AffixSetLen + 1);
 
-		ConfBuild->AffixData = repalloc(ConfBuild->AffixData, newsize);
+		ConfBuild->AffixData = (char *) repalloc(ConfBuild->AffixData, newsize);
 		ConfBuild->AffixDataSize = newsize;
 	}
 
@@ -385,6 +385,47 @@ NIBuildAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
 	/* Save offset of the end of data */
 	ConfBuild->AffixDataEnd += AffixSetLen + 1;
 	ConfBuild->nAffixData++;
+}
+
+/*
+ * Allocate space for SPNode with SPNodeData array.
+ *
+ * ConfBuild: building structure for the current dictionary.
+ * numDictNodes: number of allocated child dictionary nodes.
+ *
+ * Returns an offset of SPNode in DictNodes.
+ */
+static uint32
+NIBuildAllocateSPNode(IspellDictBuild *ConfBuild, int numDictNodes)
+{
+	SPNode	   *node;
+	uint32		node_offset;
+	uint32		size;
+
+	size = SPNHDRSZ + numDictNodes * sizeof(SPNodeData);
+
+	if (ConfBuild->DictNodesSize == 0)
+	{
+		ConfBuild->DictNodesSize = size * 8;	/* Reserve space for next levels
+												 * of the prefix tree */
+		ConfBuild->DictNodes = (char *) tmpalloc(ConfBuild->DictNodesSize);
+		ConfBuild->DictNodesEnd = 0;
+	}
+	else if (ConfBuild->DictNodesEnd + size >= ConfBuild->DictNodesSize)
+	{
+		ConfBuild->DictNodesSize = Max(ConfBuild->DictNodesSize * 2,
+									   ConfBuild->DictNodesSize + size);
+		ConfBuild->DictNodes = (char *) repalloc(ConfBuild->DictNodes,
+												 ConfBuild->DictNodesSize);
+	}
+
+	node_offset = ConfBuild->DictNodesEnd;
+	node = DictNodeGet(ConfBuild, node_offset);
+	node->length = numDictNodes;
+
+	ConfBuild->DictNodesEnd += size;
+
+	return node_offset;
 }
 
 /*
@@ -743,10 +784,10 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 		   const char *mask, const char *find, const char *repl, int type)
 {
 	AFFIX	   *Affix;
-	size_t		affixsize;
-	size_t		flaglen = strlen(flag);
-	size_t		findlen = strlen(find);
-	size_t		repllen = strlen(repl);
+	uint32		affixsize;
+	uint32		flaglen = strlen(flag),
+				findlen = strlen(find),
+				repllen = strlen(repl);
 
 	/* Sanity checks */
 	if (flaglen > AF_FLAG_MAXSIZE)
@@ -1650,7 +1691,7 @@ static int
 MergeAffix(IspellDictBuild *ConfBuild, int a1, int a2)
 {
 	char	   *ptr;
-	size_t		len;
+	uint32		len;
 
 	/* Do not merge affix flags if one of affix flags is empty */
 	if (*AffixDataGet(ConfBuild, a1) == '\0')
@@ -1693,19 +1734,20 @@ makeCompoundFlags(IspellDict *Conf, IspellDictBuild *ConfBuild, int affix)
 /*
  * Makes a prefix tree for the given level.
  *
- * Conf: current dictionary.
  * ConfBuild: building structure for the current dictionary.
  * low: lower index of the Conf->Spell array.
  * high: upper index of the Conf->Spell array.
  * level: current prefix tree level.
+ *
+ * Returns an offset of SPNode in DictNodes.
  */
-static SPNode *
-mkSPNode(IspellDict *Conf, IspellDictBuild *ConfBuild,
-		 int low, int high, int level)
+static uint32
+mkSPNode(IspellDictBuild *ConfBuild, int low, int high, int level)
 {
 	int			i;
 	int			nchar = 0;
 	char		lastchar = '\0';
+	uint32		rs_offset;
 	SPNode	   *rs;
 	SPNodeData *data;
 	int			lownew = low;
@@ -1719,10 +1761,10 @@ mkSPNode(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		}
 
 	if (!nchar)
-		return NULL;
+		return ISPELL_INVALID_OFFSET;
 
-	rs = (SPNode *) cpalloc0(SPNHDRSZ + nchar * sizeof(SPNodeData));
-	rs->length = nchar;
+	rs_offset = NIBuildAllocateSPNode(ConfBuild, nchar);
+	rs = DictNodeGet(ConfBuild, rs_offset);
 	data = rs->data;
 
 	lastchar = '\0';
@@ -1734,7 +1776,7 @@ mkSPNode(IspellDict *Conf, IspellDictBuild *ConfBuild,
 				if (lastchar)
 				{
 					/* Next level of the prefix tree */
-					data->node = mkSPNode(Conf, ConfBuild, lownew, i, level + 1);
+					data->node_offset = mkSPNode(ConfBuild, lownew, i, level + 1);
 					lownew = i;
 					data++;
 				}
@@ -1757,7 +1799,7 @@ mkSPNode(IspellDict *Conf, IspellDictBuild *ConfBuild,
 										 & makeCompoundFlags(Conf, ConfBuild,
 															 ConfBuild->Spell[i]->p.d.affix))
 						? false : true;
-					data->affix = MergeAffix(Conf, data->affix,
+					data->affix = MergeAffix(ConfBuild, data->affix,
 											 ConfBuild->Spell[i]->p.d.affix);
 				}
 				else
@@ -1777,9 +1819,9 @@ mkSPNode(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		}
 
 	/* Next level of the prefix tree */
-	data->node = mkSPNode(Conf, ConfBuild, lownew, high, level + 1);
+	data->node_offset = mkSPNode(ConfBuild, lownew, high, level + 1);
 
-	return rs;
+	return rs_offset;
 }
 
 /*
@@ -1799,7 +1841,7 @@ NISortDictionary(IspellDictBuild *ConfBuild)
 	 * If we use flag aliases then we need to use Conf->AffixData filled in
 	 * the NIImportOOAffixes().
 	 */
-	if (Conf->useFlagAliases)
+	if (ConfBuild->dict->useFlagAliases)
 	{
 		for (i = 0; i < ConfBuild->nSpell; i++)
 		{
@@ -1870,7 +1912,7 @@ NISortDictionary(IspellDictBuild *ConfBuild)
 
 	/* Start build a prefix tree */
 	qsort((void *) ConfBuild->Spell, ConfBuild->nSpell, sizeof(SPELL *), cmpspell);
-	Conf->Dictionary = mkSPNode(Conf, ConfBuild, 0, ConfBuild->nSpell, 0);
+	mkSPNode(ConfBuild, 0, ConfBuild->nSpell, 0);
 }
 
 /*

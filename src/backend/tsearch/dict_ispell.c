@@ -38,10 +38,17 @@ dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
 {
 	IspellDictBuild *build = (IspellDictBuild *) dictbuild;
 
+	Assert(dictfile && afffile);
+
 	NIStartBuild(build);
 
+	/* Read files */
 	NIImportDictionary(build, dictfile);
 	NIImportAffixes(build, afffile);
+
+	/* Build persistent data to use by backends */
+	NISortDictionary(build);
+	NISortAffixes(build);
 
 	/* Release temporary data */
 	NIFinishBuild(build);

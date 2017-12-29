@@ -18,6 +18,8 @@
 #include "tsearch/dicts/regis.h"
 #include "tsearch/ts_public.h"
 
+#define ISPELL_INVALID_OFFSET	(0xFFFFFFFF)
+
 /*
  * SPNode and SPNodeData are used to represent prefix tree (Trie) to store
  * a words list.
@@ -30,9 +32,10 @@ typedef struct
 				isword:1,
 	/* Stores compound flags listed below */
 				compoundflag:4,
-	/* Reference to an entry of the AffixData field */
+	/* Index of an entry of the AffixData field */
 				affix:19;
-	struct SPNode *node;
+	/* Offset to a node of the DictNodes field */
+	uint32		node_offset;
 } SPNodeData;
 
 /*
@@ -203,7 +206,9 @@ typedef struct IspellDictBuild
 	MemoryContext buildCxt;		/* temp context for construction */
 
 	IspellDictData *dict;
-	size_t		dict_size;
+	uint32		dict_size;
+
+	/* Temporary data */
 
 	/* Array of Hunspell options in affix file */
 	CompoundAffixFlag *CompoundAffixFlags;
@@ -212,26 +217,34 @@ typedef struct IspellDictBuild
 	/* allocated length of CompoundAffixFlags array */
 	int			mCompoundAffixFlag;
 
-	/* Temporary array of all words in the dict file */
+	/* Array of all words in the dict file */
 	SPELL	  **Spell;
 	int			nSpell;			/* number of valid entries in Spell array */
 	int			mSpell;			/* allocated length of Spell array */
 
-	/* Temporary array of all affixes in the aff file */
+	/* Array of all affixes in the aff file */
 	AFFIX	  **Affix;
 	int			nAffix;			/* number of valid entries in Affix array */
 	int			mAffix;			/* allocated length of Affix array */
+
+	/* Data for IspellDictData */
 
 	/* Array of sets of affixes */
 	uint32	   *AffixDataOffset;
 	int			nAffixData;		/* number of affix sets */
 	int			mAffixData;		/* allocated number of affix sets */
 	char	   *AffixData;
-	size_t		AffixDataSize;	/* allocated size of AffixData */
-	uint32		AffixDataEnd;	/* end of AffixData */
+	uint32		AffixDataSize;	/* allocated size of AffixData */
+	uint32		AffixDataEnd;	/* end of data in AffixData */
+
+	/* Prefix tree which stores a word list */
+	char	   *DictNodes;
+	uint32		DictNodesSize;	/* allocated size of DictNodes */
+	uint32		DictNodesEnd;	/* end of data in DictNodes */
 } IspellDictBuild;
 
-#define AffixDataGet(af, i)		((af)->AffixData + (af)->AffixDataOffset[i])
+#define AffixDataGet(d, i)		((d)->AffixData + (d)->AffixDataOffset[(i)])
+#define DictNodeGet(d, of)		(((of) == ISPELL_INVALID_OFFSET) ? NULL : (d)->DictNodes + (of))
 
 typedef struct IspellDictData
 {
@@ -240,7 +253,7 @@ typedef struct IspellDictData
 
 	bool		useFlagAliases;
 
-	size_t		AffixDataSize;
+	uint32		AffixDataSize;
 	/*
 	 * data stores:
 	 * - array of sets of affixes
@@ -254,7 +267,7 @@ typedef struct IspellDictData
 typedef struct
 {
 	/* Allocated size of IspellDict */
-	size_t		size;
+	uint32		size;
 
 	AffixNode  *Suffix;
 	AffixNode  *Prefix;
