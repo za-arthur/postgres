@@ -27,15 +27,28 @@ typedef struct
 	IspellDictBuild build;
 } DictISpell;
 
+/*
+ * Build the dictionary.
+ *
+ * Result is palloc'ed.
+ */
 static const void *
-dispell_build(const char *dictfile, const char *afffile, Size *size)
+dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
+			  Size *size)
 {
-	char	   *buf;
+	IspellDictBuild *build = (IspellDictBuild *) dictbuild;
 
-	buf = (char *) palloc0(10);
-	*size = 10;
+	NIStartBuild(build);
 
-	return buf;
+	NIImportDictionary(build, dictfile);
+	NIImportAffixes(build, afffile);
+
+	/* Release temporary data */
+	NIFinishBuild(build);
+
+	/* Return the buffer and its size */
+	*size = build->dict_size;
+	return build->dict;
 }
 
 Datum
@@ -43,9 +56,9 @@ dispell_init(PG_FUNCTION_ARGS)
 {
 	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
 	DictISpell *d;
-	bool		affloaded = false,
-				dictloaded = false,
-				stoploaded = false;
+	const	   *dictfile = NULL,
+			   *afffile = NULL;
+	bool		stoploaded = false;
 	ListCell   *l;
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
@@ -59,25 +72,19 @@ dispell_init(PG_FUNCTION_ARGS)
 
 		if (pg_strcasecmp(defel->defname, "DictFile") == 0)
 		{
-			if (dictloaded)
+			if (dictfile)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple DictFile parameters")));
-			NIImportDictionary(&(d->build),
-							   get_tsearch_config_filename(defGetString(defel),
-														   "dict"));
-			dictloaded = true;
+			dictfile = get_tsearch_config_filename(defGetString(defel), "dict");
 		}
 		else if (pg_strcasecmp(defel->defname, "AffFile") == 0)
 		{
-			if (affloaded)
+			if (afffile)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple AffFile parameters")));
-			NIImportAffixes(&(d->build),
-							get_tsearch_config_filename(defGetString(defel),
-														"affix"));
-			affloaded = true;
+			afffile = get_tsearch_config_filename(defGetString(defel), "affix");
 		}
 		else if (pg_strcasecmp(defel->defname, "StopWords") == 0)
 		{
@@ -97,12 +104,12 @@ dispell_init(PG_FUNCTION_ARGS)
 		}
 	}
 
-	if (affloaded && dictloaded)
+	if (dictfile && affile)
 	{
 		NISortDictionary(&(d->build));
 		NISortAffixes(&(d->build));
 	}
-	else if (!affloaded)
+	else if (!afffile)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),

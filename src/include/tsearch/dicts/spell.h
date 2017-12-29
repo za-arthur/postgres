@@ -223,12 +223,12 @@ typedef struct IspellDictBuild
 	int			mAffix;			/* allocated length of Affix array */
 
 	/* Array of sets of affixes */
-	char	   *AffixData;
-	size_t		AffixDataSize;	/* allocated size of AffixData */
-	uint32		AffixDataEnd;	/* end of AffixData */
 	uint32	   *AffixDataOffset;
 	int			nAffixData;		/* number of affix sets */
 	int			mAffixData;		/* allocated number of affix sets */
+	char	   *AffixData;
+	size_t		AffixDataSize;	/* allocated size of AffixData */
+	uint32		AffixDataEnd;	/* end of AffixData */
 } IspellDictBuild;
 
 #define AffixDataGet(af, i)		((af)->AffixData + (af)->AffixDataOffset[i])
