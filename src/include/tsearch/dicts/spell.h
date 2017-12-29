@@ -194,24 +194,6 @@ typedef struct CompoundAffixFlag
 #define FLAGNUM_MAXSIZE		(1 << 16)
 
 /*
- * Stores array of affix sets.
- */
-typedef struct AffixSetsData
-{
-	/* Number of affix sets */
-	int			length;
-	/* Allocated number of affix sets */
-	int			allocated;
-	uint32	   *offset;
-	/* Allocated size of AffixSetsData */
-	size_t		size;
-	char		data[FLEXIBLE_ARRAY_MEMBER];
-} AffixSetsData;
-
-#define AffixSetsDataHdrSize	(offsetof(AffixSetsData, data))
-#define AffixSetsGet(as, i)		((as)->data + (as)->offset[i])
-
-/*
  * IspellDictBuild is used to initialize IspellDict struct.  This is a
  * temprorary structure which is setup by NIStartBuild() and released by
  * NIFinishBuild().
@@ -220,7 +202,8 @@ typedef struct IspellDictBuild
 {
 	MemoryContext buildCxt;		/* temp context for construction */
 
-	IspellDict *dict;
+	IspellDictData *dict;
+	size_t		dict_size;
 
 	/* Array of Hunspell options in affix file */
 	CompoundAffixFlag *CompoundAffixFlags;
@@ -231,18 +214,36 @@ typedef struct IspellDictBuild
 
 	/* Temporary array of all words in the dict file */
 	SPELL	  **Spell;
-	int			nspell;			/* number of valid entries in Spell array */
-	int			mspell;			/* allocated length of Spell array */
+	int			nSpell;			/* number of valid entries in Spell array */
+	int			mSpell;			/* allocated length of Spell array */
 
 	/* Temporary array of all affixes in the aff file */
 	AFFIX	  **Affix;
-	int			naffix;			/* number of valid entries in Affix array */
-	int			maffix;			/* allocated length of Affix array */
-	size_t		affixsize;		/* whole size of valid entries */
+	int			nAffix;			/* number of valid entries in Affix array */
+	int			mAffix;			/* allocated length of Affix array */
 
-	/* Array of affix sets */
-	AffixSetsData *AffixData;
+	/* Array of sets of affixes */
+	char	   *AffixData;
+	size_t		AffixDataSize;	/* allocated size of AffixData */
+	uint32		AffixDataEnd;	/* end of AffixData */
+	uint32	   *AffixDataOffset;
+	int			nAffixData;		/* number of affix sets */
+	int			mAffixData;		/* allocated number of affix sets */
 } IspellDictBuild;
+
+#define AffixDataGet(af, i)		((af)->AffixData + (af)->AffixDataOffset[i])
+
+typedef struct IspellDictData
+{
+	/*
+	 * data stores:
+	 * - array of sets of affixes
+	 * - array of AFFIX
+	 */
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+} IspellDictData;
+
+#define IspellDictDataHdrSize	(offsetof(IspellDictData, data))
 
 typedef struct
 {
