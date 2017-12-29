@@ -18,6 +18,7 @@
 #include "tsearch/dicts/regis.h"
 #include "tsearch/ts_public.h"
 
+#define ISPELL_INVALID_INDEX	(-1)
 #define ISPELL_INVALID_OFFSET	(0xFFFFFFFF)
 
 /*
@@ -120,7 +121,7 @@ typedef struct aff_struct
 #define AffixFieldRepl(af)	((af)->fields)
 #define AffixFieldFind(af)	((af)->fields + (af)->replen + 1)
 #define AffixFieldFlag(af)	(AffixFieldFind(af) + (af)->findlen + 1)
-#define AffixSize(af)		(AFFIXHDRSZ + strlen((af)->fields) + 1)
+//#define AffixSize(af)		(AFFIXHDRSZ + strlen((af)->fields) + 1)
 
 /*
  * affixes use dictionary flags too
@@ -161,7 +162,8 @@ typedef struct AffixNode
 
 typedef struct
 {
-	char	   *affix;
+	/* Index of an affix of the Affix field */
+	uint32		affix;
 	int			len;
 	bool		issuffix;
 } CMPDAffix;
@@ -222,12 +224,15 @@ typedef struct IspellDictBuild
 	int			nSpell;			/* number of valid entries in Spell array */
 	int			mSpell;			/* allocated length of Spell array */
 
+	/* Data for IspellDictData */
+
 	/* Array of all affixes in the aff file */
-	AFFIX	  **Affix;
+	uint32	   *AffixOffset;
 	int			nAffix;			/* number of valid entries in Affix array */
 	int			mAffix;			/* allocated length of Affix array */
-
-	/* Data for IspellDictData */
+	char	   *Affix;
+	uint32		AffixSize;		/* allocated size of Affix */
+	uint32		AffixEnd;		/* end of data in Affix */
 
 	/* Array of sets of affixes */
 	uint32	   *AffixDataOffset;
@@ -241,9 +246,13 @@ typedef struct IspellDictBuild
 	char	   *DictNodes;
 	uint32		DictNodesSize;	/* allocated size of DictNodes */
 	uint32		DictNodesEnd;	/* end of data in DictNodes */
+
+	/* Array of compound affixes */
+	CMPDAffix  *CompoundAffix;
 } IspellDictBuild;
 
-#define AffixDataGet(d, i)		((d)->AffixData + (d)->AffixDataOffset[(i)])
+#define AffixGet(d, i)			(((i) == ISPELL_INVALID_INDEX) ? NULL : (d)->Affix + (d)->AffixOffset[i])
+#define AffixDataGet(d, i)		((d)->AffixData + (d)->AffixDataOffset[i])
 #define DictNodeGet(d, of)		(((of) == ISPELL_INVALID_OFFSET) ? NULL : (d)->DictNodes + (of))
 
 typedef struct IspellDictData
