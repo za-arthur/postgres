@@ -235,6 +235,12 @@ typedef struct IspellDictBuild
 
 typedef struct IspellDictData
 {
+	FlagMode	flagMode;
+	bool		usecompound;
+
+	bool		useFlagAliases;
+
+	size_t		AffixDataSize;
 	/*
 	 * data stores:
 	 * - array of sets of affixes

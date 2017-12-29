@@ -520,6 +520,7 @@ RegisterLWLockTranches(void)
 						  "shared_tuplestore");
 	LWLockRegisterTranche(LWTRANCHE_TBM, "tbm");
 	LWLockRegisterTranche(LWTRANCHE_PARALLEL_APPEND, "parallel_append");
+	LWLockRegisterTranche(LWTRANCHE_TSEARCH_DSA, "tsearch_dsa");
 
 	/* Register named tranches. */
 	for (i = 0; i < NamedLWLockTrancheRequests; i++)
