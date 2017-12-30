@@ -121,7 +121,7 @@ typedef struct aff_struct
 #define AffixFieldRepl(af)	((af)->fields)
 #define AffixFieldFind(af)	((af)->fields + (af)->replen + 1)
 #define AffixFieldFlag(af)	(AffixFieldFind(af) + (af)->findlen + 1)
-//#define AffixSize(af)		(AFFIXHDRSZ + strlen((af)->fields) + 1)
+#define AffixSize(af)		(AFFIXHDRSZ + AffixFieldFlag(af) + strlen(AffixFieldFlag(af)) + 1)
 
 /*
  * affixes use dictionary flags too
@@ -147,18 +147,31 @@ typedef struct
 {
 	uint32		val:8,
 				naff:24;
-	AFFIX	  **aff;
-	struct AffixNode *node;
+	/* Offset to a node of the PrefixNodes or SuffixNodes field */
+	uint32		node_offset;
+	uint32		aff[FLEXIBLE_ARRAY_MEMBER];
 } AffixNodeData;
+
+#define ANDHDRSZ				(offsetof(AffixNodeData, aff))
+#define AffixNodeDataSize(an)	(ANDHDRSZ + sizeof(uint32) * (an)->naff)
 
 typedef struct AffixNode
 {
 	uint32		isvoid:1,
 				length:31;
-	AffixNodeData data[FLEXIBLE_ARRAY_MEMBER];
+	char		data[FLEXIBLE_ARRAY_MEMBER];
 } AffixNode;
 
 #define ANHRDSZ		   (offsetof(AffixNode, data))
+
+typedef struct NodeArray
+{
+	char	   *Nodes;
+	uint32		NodesSize;	/* allocated size of Nodes */
+	uint32		NodesEnd;	/* end of data in Nodes */
+} NodeArray;
+
+#define NodeArrayGet(na, of)		(((of) == ISPELL_INVALID_OFFSET) ? NULL : (na)->Nodes + (of))
 
 typedef struct
 {
@@ -198,6 +211,24 @@ typedef struct CompoundAffixFlag
 
 #define FLAGNUM_MAXSIZE		(1 << 16)
 
+typedef struct IspellDictData
+{
+	FlagMode	flagMode;
+	bool		usecompound;
+
+	bool		useFlagAliases;
+
+	uint32		AffixDataSize;
+	/*
+	 * data stores:
+	 * - array of sets of affixes
+	 * - array of AFFIX
+	 */
+	char		data[FLEXIBLE_ARRAY_MEMBER];
+} IspellDictData;
+
+#define IspellDictDataHdrSize	(offsetof(IspellDictData, data))
+
 /*
  * IspellDictBuild is used to initialize IspellDict struct.  This is a
  * temprorary structure which is setup by NIStartBuild() and released by
@@ -224,15 +255,12 @@ typedef struct IspellDictBuild
 	int			nSpell;			/* number of valid entries in Spell array */
 	int			mSpell;			/* allocated length of Spell array */
 
-	/* Data for IspellDictData */
-
 	/* Array of all affixes in the aff file */
-	uint32	   *AffixOffset;
+	AFFIX	  **Affix;
 	int			nAffix;			/* number of valid entries in Affix array */
 	int			mAffix;			/* allocated length of Affix array */
-	char	   *Affix;
-	uint32		AffixSize;		/* allocated size of Affix */
-	uint32		AffixEnd;		/* end of data in Affix */
+
+	/* Data for IspellDictData */
 
 	/* Array of sets of affixes */
 	uint32	   *AffixDataOffset;
@@ -243,9 +271,13 @@ typedef struct IspellDictBuild
 	uint32		AffixDataEnd;	/* end of data in AffixData */
 
 	/* Prefix tree which stores a word list */
-	char	   *DictNodes;
-	uint32		DictNodesSize;	/* allocated size of DictNodes */
-	uint32		DictNodesEnd;	/* end of data in DictNodes */
+	NodeArray	DictNodes;
+
+	/* Prefix tree which stores a prefix list */
+	NodeArray	PrefixNodes;
+
+	/* Prefix tree which stores a suffix list */
+	NodeArray	PrefixNodes;
 
 	/* Array of compound affixes */
 	CMPDAffix  *CompoundAffix;
@@ -253,26 +285,6 @@ typedef struct IspellDictBuild
 
 #define AffixGet(d, i)			(((i) == ISPELL_INVALID_INDEX) ? NULL : (d)->Affix + (d)->AffixOffset[i])
 #define AffixDataGet(d, i)		((d)->AffixData + (d)->AffixDataOffset[i])
-#define DictNodeGet(d, of)		(((of) == ISPELL_INVALID_OFFSET) ? NULL : (d)->DictNodes + (of))
-
-typedef struct IspellDictData
-{
-	FlagMode	flagMode;
-	bool		usecompound;
-
-	bool		useFlagAliases;
-
-	uint32		AffixDataSize;
-
-	/*
-	 * data stores:
-	 * - array of sets of affixes
-	 * - array of AFFIX
-	 */
-	char		data[FLEXIBLE_ARRAY_MEMBER];
-} IspellDictData;
-
-#define IspellDictDataHdrSize	(offsetof(IspellDictData, data))
 
 typedef struct
 {
