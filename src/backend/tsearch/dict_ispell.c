@@ -27,36 +27,9 @@ typedef struct
 	IspellDictBuild build;
 } DictISpell;
 
-/*
- * Build the dictionary.
- *
- * Result is palloc'ed.
- */
-static void *
-dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
-			  Size *size)
-{
-	IspellDictBuild *build = (IspellDictBuild *) dictbuild;
-
-	Assert(dictfile && afffile);
-
-	NIStartBuild(build);
-
-	/* Read files */
-	NIImportDictionary(build, dictfile);
-	NIImportAffixes(build, afffile);
-
-	/* Build persistent data to use by backends */
-	NISortDictionary(build);
-	NISortAffixes(build);
-
-	/* Release temporary data */
-	NIFinishBuild(build);
-
-	/* Return the buffer and its size */
-	*size = build->dict_size;
-	return build->dict;
-}
+static void *dispell_build(void *dictbuild,
+						   const char *dictfile, const char *afffile,
+						   Size *size);
 
 Datum
 dispell_init(PG_FUNCTION_ARGS)
@@ -168,4 +141,37 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	cptr->lexeme = NULL;
 
 	PG_RETURN_POINTER(res);
+}
+
+/*
+ * Build the dictionary.
+ *
+ * Result is palloc'ed.
+ */
+static void *
+dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
+			  Size *size)
+{
+	IspellDictBuild *build = (IspellDictBuild *) dictbuild;
+
+	Assert(dictfile && afffile);
+
+	NIStartBuild(build);
+
+	/* Read files */
+	NIImportDictionary(build, dictfile);
+	NIImportAffixes(build, afffile);
+
+	/* Build persistent data to use by backends */
+	NISortDictionary(build);
+	NISortAffixes(build);
+
+	NICopyData(build);
+
+	/* Release temporary data */
+	NIFinishBuild(build);
+
+	/* Return the buffer and its size */
+	*size = build->dict_size;
+	return build->dict;
 }

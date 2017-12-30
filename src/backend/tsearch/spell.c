@@ -99,9 +99,93 @@ NIStartBuild(IspellDictBuild *ConfBuild)
 	 * Allocate buffer for the dictionary in current context not in buildCxt.
 	 * Initially allocate 2MB for IspellDictData.
 	 */
-	dict_size = IspellDictDataHdrSize + 2 * 1024 * 1024;
+	dict_size = IspellDictDataHdrSize;
 	ConfBuild->dict = palloc(dict_size);
 	ConfBuild->dict_size = dict_size;
+}
+
+/*
+ * Copy temporary data into IspellDictData.
+ */
+void
+NICopyData(IspellDictBuild *ConfBuild)
+{
+	IspellDictData *dict;
+	uint32		size;
+	int			i;
+	uint32	   *offsets,
+				offset;
+
+	/*
+	 * Calculate necessary space
+	 */
+	size = ConfBuild->nAffixData * sizeof(uint32);
+	size += ConfBuild->AffixDataEnd;
+
+	size += ConfBuild->nAffix * sizeof(uint32);
+	size += ConfBuild->AffixSize;
+
+	size += ConfBuild->DictNodes.NodesEnd;
+	size += ConfBuild->PrefixNodes.NodesEnd;
+	size += ConfBuild->SuffixNodes.NodesEnd;
+
+	size += ConfBuild->nCompoundAffix;
+
+	/*
+	 * Copy data itself
+	 */
+	ConfBuild->dict_size = IspellDictDataHdrSize + size;
+	ConfBuild->dict = repalloc(ConfBuild->dict, ConfBuild->dict_size);
+
+	dict = ConfBuild->dict;
+
+	/* AffixData */
+	dict->nAffixData = ConfBuild->nAffixData;
+	dict->AffixDataStart = sizeof(uint32) * ConfBuild->nAffixData;
+	memcpy(DictAffixDataOffset(dict), ConfBuild->AffixDataOffset,
+		   sizeof(uint32) * ConfBuild->nAffixData);
+	memcpy(DictAffixData(dict), ConfBuild->AffixData, ConfBuild->AffixDataEnd);
+
+	/* Affix array */
+	dict->nAffix = ConfBuild->nAffix;
+	dict->AffixOffsetStart = dict->AffixDataStart + ConfBuild->AffixDataEnd;
+	dict->AffixStart = dict->AffixOffsetStart + sizeof(uint32) * ConfBuild->nAffix;
+	offsets = (uint32 *) DictAffixOffset(dict);
+	offset = 0;
+	for (i = 0; i < ConfBuild->nAffix; i++)
+	{
+		AFFIX	   *affix;
+		uint32		size = AffixGetSize(ConfBuild->Affix[i]);
+
+		offsets[i] = offset;
+		affix = (AFFIX *) DictAffixGet(dict, i);
+		Assert(affix);
+
+		memcpy(affix, ConfBuild->Affix[i], size);
+
+		offset += size;
+	}
+
+	/* DictNodes prefix tree */
+	dict->DictNodesStart = dict->AffixStart + ConfBuild->DictNodes.NodesEnd;
+	memcpy(DictDictNodes(dict), ConfBuild->DictNodes.Nodes,
+		   ConfBuild->DictNodes.NodesEnd);
+
+	/* PrefixNodes prefix tree */
+	dict->PrefixNodesStart = dict->DictNodesStart + ConfBuild->PrefixNodes.NodesEnd;
+	memcpy(DictPrefixNodes(dict), ConfBuild->PrefixNodes.Nodes,
+		   ConfBuild->PrefixNodes.NodesEnd);
+
+	/* SuffixNodes prefix tree */
+	dict->SuffixNodesStart = dict->PrefixNodesStart + ConfBuild->SuffixNodes.NodesEnd;
+	memcpy(DictSuffixNodes(dict), ConfBuild->SuffixNodes.Nodes,
+		   ConfBuild->SuffixNodes.NodesEnd);
+
+	/* CompoundAffix array */
+	dict->CompoundAffixStart = dict->SuffixNodesStart +
+		sizeof(CMPDAffix) * ConfBuild->nCompoundAffix;
+	memcpy(DictCompoundAffix(dict), ConfBuild->CompoundAffix,
+		   sizeof(CMPDAffix) * ConfBuild->nCompoundAffix);
 }
 
 /*
@@ -886,7 +970,7 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 	StrNCpy(AffixFieldFlag(Affix), flag, flaglen + 1);
 
 	ConfBuild->nAffix++;
-//	ConfBuild->AffixSize += affixsize;
+	ConfBuild->AffixSize += size;
 }
 
 /* Parsing states for parse_affentry() and friends */
@@ -2084,8 +2168,9 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 	if (ConfBuild->nAffix > 1)
 		qsort((void *) ConfBuild->Affix, ConfBuild->nAffix,
 			  sizeof(AFFIX *), cmpaffix);
+	ConfBuild->nCompoundAffix = ConfBuild->nAffix;
 	ConfBuild->CompoundAffix = ptr =
-		(CMPDAffix *) tmpalloc(sizeof(CMPDAffix) * ConfBuild->nAffix);
+		(CMPDAffix *) tmpalloc(sizeof(CMPDAffix) * ConfBuild->nCompoundAffix);
 	ptr->affix = ISPELL_INVALID_INDEX;
 
 	for (i = 0; i < ConfBuild->nAffix; i++)
@@ -2112,8 +2197,9 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 		}
 	}
 	ptr->affix = ISPELL_INVALID_INDEX;
+	ConfBuild->nCompoundAffix = ptr - ConfBuild->CompoundAffix + 1;
 	ConfBuild->CompoundAffix = (CMPDAffix *) repalloc(ConfBuild->CompoundAffix,
-								sizeof(CMPDAffix) * (ptr - ConfBuild->CompoundAffix + 1));
+							   sizeof(CMPDAffix) * (ConfBuild->nCompoundAffix));
 
 	/* Start build a prefix tree */
 	mkVoidAffix(ConfBuild, true, firstsuffix);
