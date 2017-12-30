@@ -388,42 +388,40 @@ NIAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
 }
 
 /*
- * Allocate space for SPNode with SPNodeData array.
+ * Allocate space for prefix tree node.
  *
  * ConfBuild: building structure for the current dictionary.
- * numDictNodes: number of allocated child dictionary nodes.
+ * array: NodeArray where to allocate new node.
+ * length: number of allocated NodeData.
+ * sizeNodeData: minimum size of each NodeData.
+ * sizeNodeHeader: size of header of new node.
  *
- * Returns an offset of SPNode in DictNodes.
+ * Returns an offset of new node in NodeArray.
  */
 static uint32
-NIAllocateSPNode(IspellDictBuild *ConfBuild, int numDictNodes)
+NIAllocateNode(IspellDictBuild *ConfBuild, NodeArray *array, uint32 length,
+			   uint32 sizeNodeData, uint32 sizeNodeHeader)
 {
-	SPNode	   *node;
 	uint32		node_offset;
 	uint32		size;
 
-	size = SPNHDRSZ + numDictNodes * sizeof(SPNodeData);
+	size = sizeNodeHeader + length * sizeNodeData;
 
-	if (ConfBuild->DictNodesSize == 0)
+	if (array->NodesSize == 0)
 	{
-		ConfBuild->DictNodesSize = size * 8;	/* Reserve space for next levels
-												 * of the prefix tree */
-		ConfBuild->DictNodes = (char *) tmpalloc(ConfBuild->DictNodesSize);
-		ConfBuild->DictNodesEnd = 0;
+		array->NodesSize = size * 8;	/* Reserve space for next levels of the
+										 * prefix tree */
+		array->Nodes = (char *) tmpalloc(array->NodesSize);
+		array->NodesEnd = 0;
 	}
-	else if (ConfBuild->DictNodesEnd + size >= ConfBuild->DictNodesSize)
+	else if (array->NodesEnd + size >= array->NodesSize)
 	{
-		ConfBuild->DictNodesSize = Max(ConfBuild->DictNodesSize * 2,
-									   ConfBuild->DictNodesSize + size);
-		ConfBuild->DictNodes = (char *) repalloc(ConfBuild->DictNodes,
-												 ConfBuild->DictNodesSize);
+		array->NodesSize = Max(array->NodesSize * 2, array->NodesSize + size);
+		array->Nodes = (char *) repalloc(array->Nodes, array->NodesSize);
 	}
 
-	node_offset = ConfBuild->DictNodesEnd;
-	node = DictNodeGet(ConfBuild, node_offset);
-	node->length = numDictNodes;
-
-	ConfBuild->DictNodesEnd += size;
+	node_offset = array->NodesEnd;
+	array->NodesEnd += size;
 
 	return node_offset;
 }
@@ -800,39 +798,26 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
 				 errmsg("affix repl field \"%s\" too long", repl)));
 
+	if (ConfBuild->nAffix >= ConfBuild->mAffix)
+	{
+		if (ConfBuild->mAffix)
+		{
+			ConfBuild->mAffix *= 2;
+			ConfBuild->Affix = (AFFIX **) repalloc(ConfBuild->Affix,
+												   ConfBuild->mAffix * sizeof(AFFIX *));
+		}
+		else
+		{
+			ConfBuild->mAffix = 255;
+			ConfBuild->Affix = (AFFIX **) tmpalloc(ConfBuild->mAffix * sizeof(AFFIX *));
+		}
+	}
+
 	size = AFFIXHDRSZ + flaglen + 1 /* \0 */ + findlen + 1 /* \0 */ +
 		repllen + 1 /* \0 */;
 
-	/* Check available space for Affix */
-	if (ConfBuild->AffixSize == 0)
-	{
-		ConfBuild->AffixSize = size * 32;	/* Reserve space for others */
-		ConfBuild->Affix = (char *) tmpalloc(ConfBuild->AffixSize);
-		ConfBuild->AffixEnd = 0;
-	}
-	else if (ConfBuild->AffixEnd + size >= ConfBuild->AffixSize)
-	{
-		ConfBuild->AffixSize = Max(ConfBuild->AffixSize * 2,
-								   ConfBuild->DictNodesSize + size);
-		ConfBuild->Affix = (char *) repalloc(ConfBuild->Affix,
-											 ConfBuild->AffixSize);
-	}
-
-	/* Check available number of offsets */
-	if (ConfBuild->mAffix == 0)
-	{
-		ConfBuild->mAffix = 32;
-		ConfBuild->Affix = (uint32 *) tmpalloc(ConfBuild->mAffix);
-		ConfBuild->nAffix = 0;
-	}
-	else if (ConfBuild->nAffix >= ConfBuild->mAffix)
-	{
-		ConfBuild->mAffix *= 2;
-		ConfBuild->Affix = (uint32 *) repalloc(ConfBuild->Affix,
-											   ConfBuild->mAffix);
-	}
-
-	Affix = (AFFIX *) AffixGet(ConfBuild, ConfBuild->nAffix);
+	Affix = (AFFIX *) tmpalloc(affixsize);
+	ConfBuild->Affix[ConfBuild->nAffix] = Affix;
 
 	/* This affix rule can be applied for words with any ending */
 	if (strcmp(mask, ".") == 0 || *mask == '\0')
@@ -1773,8 +1758,10 @@ mkSPNode(IspellDictBuild *ConfBuild, int low, int high, int level)
 	if (!nchar)
 		return ISPELL_INVALID_OFFSET;
 
-	rs_offset = NIAllocateSPNode(ConfBuild, nchar);
-	rs = DictNodeGet(ConfBuild, rs_offset);
+	rs_offset = NIAllocateNode(ConfBuild, &ConfBuild->DictNodes, nchar,
+							   sizeof(SPNodeData), SPNHDRSZ);
+	rs = NodeArrayGet(&ConfBuild->DictNodes, rs_offset);
+	rs->length = nchar;
 	data = rs->data;
 
 	lastchar = '\0';
@@ -1930,7 +1917,6 @@ NISortDictionary(IspellDictBuild *ConfBuild)
  * rule. Affixes with empty replace string do not include in the prefix tree.
  * This affixes are included by mkVoidAffix().
  *
- * Conf: current dictionary.
  * ConfBuild: building structure for the current dictionary.
  * low: lower index of the Conf->Affix array.
  * high: upper index of the Conf->Affix array.
@@ -2017,32 +2003,32 @@ mkANode(IspellDict *Conf, IspellDictBuild *ConfBuild,
  * for affixes which have empty replace string ("repl" field).
  */
 static void
-mkVoidAffix(IspellDict *Conf, bool issuffix, int startsuffix)
+mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 {
 	int			i,
 				cnt = 0;
 	int			start = (issuffix) ? startsuffix : 0;
-	int			end = (issuffix) ? Conf->naffixes : startsuffix;
+	int			end = (issuffix) ? ConfBuild->nAffix : startsuffix;
 	AffixNode  *Affix = (AffixNode *) palloc0(ANHRDSZ + sizeof(AffixNodeData));
+
+	/* Count affixes with empty replace string */
+	for (i = start; i < end; i++)
+		if (ConfBuild->Affix[i]->replen == 0)
+			cnt++;
 
 	Affix->length = 1;
 	Affix->isvoid = 1;
 
 	if (issuffix)
 	{
-		Affix->data->node = Conf->Suffix;
-		Conf->Suffix = Affix;
+		Affix->data->node = ConfBuild->Suffix;
+		ConfBuild->Suffix = Affix;
 	}
 	else
 	{
-		Affix->data->node = Conf->Prefix;
-		Conf->Prefix = Affix;
+		Affix->data->node = ConfBuild->Prefix;
+		ConfBuild->Prefix = Affix;
 	}
-
-	/* Count affixes with empty replace string */
-	for (i = start; i < end; i++)
-		if (Conf->Affix[i].replen == 0)
-			cnt++;
 
 	/* There is not affixes with empty replace string */
 	if (cnt == 0)
@@ -2053,9 +2039,9 @@ mkVoidAffix(IspellDict *Conf, bool issuffix, int startsuffix)
 
 	cnt = 0;
 	for (i = start; i < end; i++)
-		if (Conf->Affix[i].replen == 0)
+		if (ConfBuild->Affix[i]->replen == 0)
 		{
-			Affix->data->aff[cnt] = Conf->Affix + i;
+			Affix->data->aff[cnt] = ConfBuild->Affix + i;
 			cnt++;
 		}
 }
