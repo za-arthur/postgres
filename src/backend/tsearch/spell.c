@@ -202,60 +202,6 @@ NIFinishBuild(IspellDictBuild *ConfBuild)
 	ConfBuild->CompoundAffixFlags = NULL;
 }
 
-
-/*
- * "Compact" palloc: allocate without extra palloc overhead.
- *
- * Since we have no need to free the ispell data items individually, there's
- * not much value in the per-chunk overhead normally consumed by palloc.
- * Getting rid of it is helpful since ispell can allocate a lot of small nodes.
- *
- * We currently pre-zero all data allocated this way, even though some of it
- * doesn't need that.  The cpalloc and cpalloc0 macros are just documentation
- * to indicate which allocations actually require zeroing.
- */
-#define COMPACT_ALLOC_CHUNK 8192	/* amount to get from palloc at once */
-#define COMPACT_MAX_REQ		1024	/* must be < COMPACT_ALLOC_CHUNK */
-
-static void *
-compact_palloc0(IspellDict *Conf, size_t size)
-{
-	void	   *result;
-
-	/* No point in this for large chunks */
-	if (size > COMPACT_MAX_REQ)
-		return palloc0(size);
-
-	/* Keep everything maxaligned */
-	size = MAXALIGN(size);
-
-	/* Need more space? */
-	if (size > Conf->avail)
-	{
-		Conf->firstfree = palloc0(COMPACT_ALLOC_CHUNK);
-		Conf->avail = COMPACT_ALLOC_CHUNK;
-	}
-
-	result = (void *) Conf->firstfree;
-	Conf->firstfree += size;
-	Conf->avail -= size;
-
-	return result;
-}
-
-#define cpalloc(size) compact_palloc0(Conf, size)
-#define cpalloc0(size) compact_palloc0(Conf, size)
-
-static char *
-cpstrdup(IspellDict *Conf, const char *str)
-{
-	char	   *res = cpalloc(strlen(str) + 1);
-
-	strcpy(res, str);
-	return res;
-}
-
-
 /*
  * Apply lowerstr(), producing a temporary result (in the buildCxt).
  */
@@ -783,9 +729,9 @@ NIImportDictionary(IspellDictBuild *ConfBuild, const char *filename)
  * Returns 1 if the word was found in the prefix tree, else returns 0.
  */
 static int
-FindWord(IspellDict *Conf, const char *word, const char *affixflag, int flag)
+FindWord(IspellDictData *Conf, const char *word, const char *affixflag, int flag)
 {
-	SPNode	   *node = Conf->Dictionary;
+	SPNode	   *node = (SPNode *) DictDictNodes(Conf);
 	SPNodeData *StopLow,
 			   *StopHigh,
 			   *StopMiddle;
@@ -821,10 +767,14 @@ FindWord(IspellDict *Conf, const char *word, const char *affixflag, int flag)
 					 * Check if this affix rule is presented in the affix set
 					 * with index StopMiddle->affix.
 					 */
-					if (IsAffixFlagInUse(Conf, StopMiddle->affix, affixflag))
+					if (IsAffixFlagInUse(Conf->flagMode,
+										 DictAffixDataGet(Conf, StopMiddle->affix),
+										 affixflag))
 						return 1;
 				}
-				node = StopMiddle->node;
+				/* Retreive SPNode by the offset */
+				node = (SPNode *) DictNodeGet(DictDictNodes(Conf),
+											  StopMiddle->node_offset);
 				ptr++;
 				break;
 			}
@@ -2073,7 +2023,10 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 			if (ConfBuild->Affix[i]->replen == level + 1)
 			{					/* affix stopped */
 				if (data->affstart == ISPELL_INVALID_INDEX)
+				{
 					data->affstart = i;
+					data->affend = i;
+				}
 				else
 					data->affend = i;
 			}
@@ -2119,7 +2072,10 @@ mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 		if (ConfBuild->Affix[i]->replen == 0)
 		{
 			if (AffixData->affstart == ISPELL_INVALID_INDEX)
+			{
 				AffixData->affstart = i;
+				AffixData->affend = i;
+			}
 			else
 				AffixData->affend = i;
 		}
@@ -2215,18 +2171,25 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 }
 
 static AffixNodeData *
-FindAffixes(AffixNode *node, const char *word, int wrdlen, int *level, int type)
+FindAffixes(IspellDictData *Conf, AffixNode *node, const char *word, int wrdlen,
+			int *level, int type)
 {
+	AffixNode  *node_start;
 	AffixNodeData *StopLow,
 			   *StopHigh,
 			   *StopMiddle;
 	uint8 symbol;
 
+	if (type == FF_PREFIX)
+		node_start = (AffixNode *) DictPrefixNodes(Conf);
+	else
+		node_start = (AffixNode *) DictSuffixNodes(Conf);
+
 	if (node->isvoid)
 	{							/* search void affixes */
-		if (node->data->naff)
+		if (node->data->affstart != ISPELL_INVALID_INDEX)
 			return node->data;
-		node = node->data->node;
+		node = (AffixNode *) DictNodeGet(node_start, node->data->node_offset);
 	}
 
 	while (node && *level < wrdlen)
@@ -2241,9 +2204,10 @@ FindAffixes(AffixNode *node, const char *word, int wrdlen, int *level, int type)
 			if (StopMiddle->val == symbol)
 			{
 				(*level)++;
-				if (StopMiddle->naff)
+				if (StopMiddle->affstart != ISPELL_INVALID_INDEX)
 					return StopMiddle;
-				node = StopMiddle->node;
+				node = (AffixNode *) DictNodeGet(node_start,
+												 StopMiddle->node_offset);
 				break;
 			}
 			else if (StopMiddle->val < symbol)
@@ -2363,7 +2327,7 @@ addToResult(char **forms, char **cur, char *word)
 }
 
 static char **
-NormalizeSubWord(IspellDict *Conf, char *word, int flag)
+NormalizeSubWord(IspellDictData *Conf, char *word, int flag)
 {
 	AffixNodeData *suffix = NULL,
 			   *prefix = NULL;
@@ -2375,7 +2339,7 @@ NormalizeSubWord(IspellDict *Conf, char *word, int flag)
 	char	  **cur;
 	char		newword[2 * MAXNORMLEN] = "";
 	char		pnewword[2 * MAXNORMLEN] = "";
-	AffixNode  *snode = Conf->Suffix,
+	AffixNode  *snode = (AffixNode *) DictSuffixNodes(Conf),
 			   *pnode;
 	int			i,
 				j;
@@ -2395,23 +2359,27 @@ NormalizeSubWord(IspellDict *Conf, char *word, int flag)
 	}
 
 	/* Find all other NORMAL forms of the 'word' (check only prefix) */
-	pnode = Conf->Prefix;
+	pnode = (AffixNode *) DictPrefixNodes(Conf);
 	plevel = 0;
 	while (pnode)
 	{
-		prefix = FindAffixes(pnode, word, wrdlen, &plevel, FF_PREFIX);
+		prefix = FindAffixes(Conf, pnode, word, wrdlen, &plevel, FF_PREFIX);
 		if (!prefix)
 			break;
-		for (j = 0; j < prefix->naff; j++)
+		for (j = prefix->affstart; j <= prefix->affend; j++)
 		{
-			if (CheckAffix(word, wrdlen, prefix->aff[j], flag, newword, NULL))
+			AFFIX	   *affix = (AFFIX *) DictAffixGet(Conf, j);
+
+			if (affix &&
+				CheckAffix(word, wrdlen, affix, flag, newword, NULL))
 			{
 				/* prefix success */
-				if (FindWord(Conf, newword, AffixFieldFlag(prefix->aff[j]), flag))
+				if (FindWord(Conf, newword, AffixFieldFlag(affix), flag))
 					cur += addToResult(forms, cur, newword);
 			}
 		}
-		pnode = prefix->node;
+		pnode = (AffixNode *) DictNodeGet(DictPrefixNodes(Conf),
+										  prefix->node_offset);
 	}
 
 	/*
@@ -2423,45 +2391,55 @@ NormalizeSubWord(IspellDict *Conf, char *word, int flag)
 		int			baselen = 0;
 
 		/* find possible suffix */
-		suffix = FindAffixes(snode, word, wrdlen, &slevel, FF_SUFFIX);
+		suffix = FindAffixes(Conf, snode, word, wrdlen, &slevel, FF_SUFFIX);
 		if (!suffix)
 			break;
 		/* foreach suffix check affix */
-		for (i = 0; i < suffix->naff; i++)
+		for (i = suffix->affstart; i <= suffix->affend; i++)
 		{
-			if (CheckAffix(word, wrdlen, suffix->aff[i], flag, newword, &baselen))
+			AFFIX	   *sufentry = (AFFIX *) DictAffixGet(Conf, i);
+
+			if (sufentry &&
+				CheckAffix(word, wrdlen, sufentry, flag, newword, &baselen))
 			{
 				/* suffix success */
-				if (FindWord(Conf, newword, AffixFieldFlag(suffix->aff[i]), flag))
+				if (FindWord(Conf, newword, AffixFieldFlag(sufentry), flag))
 					cur += addToResult(forms, cur, newword);
 
 				/* now we will look changed word with prefixes */
-				pnode = Conf->Prefix;
+				pnode = (AffixNode *) DictPrefixNodes(Conf);
 				plevel = 0;
 				swrdlen = strlen(newword);
 				while (pnode)
 				{
-					prefix = FindAffixes(pnode, newword, swrdlen, &plevel, FF_PREFIX);
+					prefix = FindAffixes(Conf, pnode, newword, swrdlen, &plevel,
+										 FF_PREFIX);
 					if (!prefix)
 						break;
-					for (j = 0; j < prefix->naff; j++)
+					for (j = prefix->affstart; j <= prefix->affend; j++)
 					{
-						if (CheckAffix(newword, swrdlen, prefix->aff[j], flag, pnewword, &baselen))
+						AFFIX	   *prefentry = (AFFIX *) DictAffixGet(Conf, j);
+
+						if (prefentry &&
+							CheckAffix(newword, swrdlen, prefentry, flag,
+									   pnewword, &baselen))
 						{
 							/* prefix success */
-							char	   *ff = (prefix->aff[j]->flagflags & suffix->aff[i]->flagflags & FF_CROSSPRODUCT) ?
-							VoidString : AffixFieldFlag(prefix->aff[j]);
+							char	   *ff = (prefentry->flagflags & sufentry->flagflags & FF_CROSSPRODUCT) ?
+										VoidString : AffixFieldFlag(prefentry);
 
 							if (FindWord(Conf, pnewword, ff, flag))
 								cur += addToResult(forms, cur, pnewword);
 						}
 					}
-					pnode = prefix->node;
+					pnode = (AffixNode *) DictNodeGet(DictPrefixNodes(Conf),
+													  prefix->node_offset);
 				}
 			}
 		}
 
-		snode = suffix->node;
+		snode = (AffixNode *) DictNodeGet(DictSuffixNodes(Conf),
+										  suffix->node_offset);
 	}
 
 	if (cur == forms)
@@ -2481,7 +2459,8 @@ typedef struct SplitVar
 } SplitVar;
 
 static int
-CheckCompoundAffixes(CMPDAffix **ptr, char *word, int len, bool CheckInPlace)
+CheckCompoundAffixes(IspellDictData *Conf, CMPDAffix **ptr,
+					 char *word, int len, bool CheckInPlace)
 {
 	bool		issuffix;
 
@@ -2491,9 +2470,12 @@ CheckCompoundAffixes(CMPDAffix **ptr, char *word, int len, bool CheckInPlace)
 
 	if (CheckInPlace)
 	{
-		while ((*ptr)->affix)
+		while ((*ptr)->affix != ISPELL_INVALID_INDEX)
 		{
-			if (len > (*ptr)->len && strncmp((*ptr)->affix, word, (*ptr)->len) == 0)
+			AFFIX	   *affix = (AFFIX *) DictAffixGet(Conf, (*ptr)->affix);
+
+			if (len > (*ptr)->len &&
+				strncmp(AffixFieldRepl(affix), word, (*ptr)->len) == 0)
 			{
 				len = (*ptr)->len;
 				issuffix = (*ptr)->issuffix;
@@ -2507,9 +2489,12 @@ CheckCompoundAffixes(CMPDAffix **ptr, char *word, int len, bool CheckInPlace)
 	{
 		char	   *affbegin;
 
-		while ((*ptr)->affix)
+		while ((*ptr)->affix != ISPELL_INVALID_INDEX)
 		{
-			if (len > (*ptr)->len && (affbegin = strstr(word, (*ptr)->affix)) != NULL)
+			AFFIX	   *affix = (AFFIX *) DictAffixGet(Conf, (*ptr)->affix);
+
+			if (len > (*ptr)->len &&
+				(affbegin = strstr(word, AffixFieldRepl(affix))) != NULL)
 			{
 				len = (*ptr)->len + (affbegin - word);
 				issuffix = (*ptr)->issuffix;
@@ -2561,13 +2546,14 @@ AddStem(SplitVar *v, char *word)
 }
 
 static SplitVar *
-SplitToVariants(IspellDict *Conf, SPNode *snode, SplitVar *orig, char *word, int wordlen, int startpos, int minpos)
+SplitToVariants(IspellDictData *Conf, SPNode *snode, SplitVar *orig,
+				char *word, int wordlen, int startpos, int minpos)
 {
 	SplitVar   *var = NULL;
 	SPNodeData *StopLow,
 			   *StopHigh,
 			   *StopMiddle = NULL;
-	SPNode	   *node = (snode) ? snode : Conf->Dictionary;
+	SPNode	   *node = (snode) ? snode : (SPNode *) DictDictNodes(Conf);
 	int			level = (snode) ? minpos : startpos;	/* recursive
 														 * minpos==level */
 	int			lenaff;
@@ -2582,8 +2568,11 @@ SplitToVariants(IspellDict *Conf, SPNode *snode, SplitVar *orig, char *word, int
 	while (level < wordlen)
 	{
 		/* find word with epenthetic or/and compound affix */
-		caff = Conf->CompoundAffix;
-		while (level > startpos && (lenaff = CheckCompoundAffixes(&caff, word + level, wordlen - level, (node) ? true : false)) >= 0)
+		caff = (CMPDAffix *) DictCompoundAffix(Conf);
+		while (level > startpos &&
+			   (lenaff = CheckCompoundAffixes(Conf, &caff,
+											  word + level, wordlen - level,
+											  (node) ? true : false)) >= 0)
 		{
 			/*
 			 * there is one of compound affixes, so check word for existings
@@ -2630,7 +2619,8 @@ SplitToVariants(IspellDict *Conf, SPNode *snode, SplitVar *orig, char *word, int
 
 				while (ptr->next)
 					ptr = ptr->next;
-				ptr->next = SplitToVariants(Conf, NULL, new, word, wordlen, startpos + lenaff, startpos + lenaff);
+				ptr->next = SplitToVariants(Conf, NULL, new, word, wordlen,
+											startpos + lenaff, startpos + lenaff);
 
 				pfree(new->stem);
 				pfree(new);
@@ -2689,13 +2679,14 @@ SplitToVariants(IspellDict *Conf, SPNode *snode, SplitVar *orig, char *word, int
 						/* we can find next word */
 						level++;
 						AddStem(var, pnstrdup(word + startpos, level - startpos));
-						node = Conf->Dictionary;
+						node = (SPNode *) DictDictNodes(Conf);
 						startpos = level;
 						continue;
 					}
 				}
 			}
-			node = StopMiddle->node;
+			node = (SPNode *) DictNodeGet(DictDictNodes(Conf),
+										  StopMiddle->node_offset);
 		}
 		else
 			node = NULL;
@@ -2724,7 +2715,7 @@ addNorm(TSLexeme **lres, TSLexeme **lcur, char *word, int flags, uint16 NVariant
 }
 
 TSLexeme *
-NINormalizeWord(IspellDict *Conf, char *word)
+NINormalizeWord(IspellDictData *Conf, char *word)
 {
 	char	  **res;
 	TSLexeme   *lcur = NULL,

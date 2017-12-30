@@ -24,7 +24,7 @@
 typedef struct
 {
 	StopList	stoplist;
-	IspellDictBuild build;
+	IspellDictBuild obj;
 } DictISpell;
 
 static void *dispell_build(void *dictbuild,
@@ -83,7 +83,12 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	if (dictfile && afffile)
 	{
-		ispell_shmem_location(&d->build, dictfile, afffile, dispell_build);
+		IspellDictData *dict;
+
+		dict = ispell_shmem_location(&d->obj, dictfile, afffile,
+									 dispell_build);
+
+		d->obj.dict = (IspellDictData *) dict;
 	}
 	else if (!afffile)
 	{
@@ -118,7 +123,7 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(NULL);
 
 	txt = lowerstr_with_len(in, len);
-//	res = NINormalizeWord(&(d->obj), txt);
+	res = NINormalizeWord(d->obj.dict, txt);
 
 	if (res == NULL)
 		PG_RETURN_POINTER(NULL);
