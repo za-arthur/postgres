@@ -121,7 +121,8 @@ typedef struct aff_struct
 #define AffixFieldRepl(af)	((af)->fields)
 #define AffixFieldFind(af)	((af)->fields + (af)->replen + 1)
 #define AffixFieldFlag(af)	(AffixFieldFind(af) + (af)->findlen + 1)
-#define AffixSize(af)		(AFFIXHDRSZ + AffixFieldFlag(af) + strlen(AffixFieldFlag(af)) + 1)
+#define AffixGetSize(af)	(AFFIXHDRSZ + (af)->replen + 1 + (af)->findlen + 1 \
+							 + strlen(AffixFieldFlag(af)) + 1)
 
 /*
  * affixes use dictionary flags too
@@ -218,16 +219,38 @@ typedef struct IspellDictData
 
 	bool		useFlagAliases;
 
-	uint32		AffixDataSize;
+	uint32		nAffixData;
+	uint32		AffixDataStart;
+
+	uint32		AffixOffsetStart;
+	uint32		AffixStart;
+	uint32		nAffix;
+
+	uint32		DictNodesStart;
+	uint32		PrefixNodesStart;
+	uint32		SuffixNodesStart;
+
+	uint32		CompoundAffixStart;
+
 	/*
 	 * data stores:
-	 * - array of sets of affixes
-	 * - array of AFFIX
+	 * - DictNodes - prefix tree of a word list
 	 */
 	char		data[FLEXIBLE_ARRAY_MEMBER];
 } IspellDictData;
 
 #define IspellDictDataHdrSize	(offsetof(IspellDictData, data))
+
+#define DictAffixDataOffset(d)	((d)->data)
+#define DictAffixData(d)		((d)->data + (d)->AffixDataStart)
+#define DictAffixOffset(d)		((d)->data + (d)->AffixOffsetStart)
+#define DictAffix(d)			((d)->data + (d)->AffixStart)
+#define DictAffixGet(d, i)		(((i) == ISPELL_INVALID_INDEX) ? NULL : \
+								 DictAffix(d) + ((uint32 *) DictAffixOffset(d))[i])
+#define DictDictNodes(d)		((d)->data + (d)->DictNodesStart)
+#define DictPrefixNodes(d)		((d)->data + (d)->PrefixNodesStart)
+#define DictSuffixNodes(d)		((d)->data + (d)->SuffixNodesStart)
+#define DictCompoundAffix(d)	((d)->data + (d)->CompoundAffixStart)
 
 /*
  * IspellDictBuild is used to initialize IspellDict struct.  This is a
@@ -259,6 +282,7 @@ typedef struct IspellDictBuild
 	AFFIX	  **Affix;
 	int			nAffix;			/* number of valid entries in Affix array */
 	int			mAffix;			/* allocated length of Affix array */
+	uint32		AffixSize;
 
 	/* Data for IspellDictData */
 
@@ -281,6 +305,7 @@ typedef struct IspellDictBuild
 
 	/* Array of compound affixes */
 	CMPDAffix  *CompoundAffix;
+	int			nCompoundAffix;	/* number of entries of CompoundAffix */
 } IspellDictBuild;
 
 #define AffixGet(d, i)			(((i) == ISPELL_INVALID_INDEX) ? NULL : (d)->Affix + (d)->AffixOffset[i])
@@ -328,6 +353,7 @@ extern void NIImportDictionary(IspellDictBuild *ConfBuild,
 							   const char *filename);
 extern void NISortDictionary(IspellDictBuild *ConfBuild);
 extern void NISortAffixes(IspellDictBuild *ConfBuild);
+extern void NICopyData(IspellDictBuild *ConfBuild);
 extern void NIFinishBuild(IspellDictBuild *ConfBuild);
 
 #endif
