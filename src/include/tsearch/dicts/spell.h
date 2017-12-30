@@ -234,7 +234,12 @@ typedef struct IspellDictData
 
 	/*
 	 * data stores:
+	 * - AffixData - array of affix sets
+	 * - Affix - sorted array of affixes
 	 * - DictNodes - prefix tree of a word list
+	 * - PrefixNodes - prefix tree of a prefix list
+	 * - SuffixNodes - prefix tree of a suffix list
+	 * - CompoundAffix - array of compound affixes
 	 */
 	char		data[FLEXIBLE_ARRAY_MEMBER];
 } IspellDictData;
@@ -243,17 +248,23 @@ typedef struct IspellDictData
 
 #define DictAffixDataOffset(d)	((d)->data)
 #define DictAffixData(d)		((d)->data + (d)->AffixDataStart)
+#define DictAffixDataGet(d, i)	(((i) == ISPELL_INVALID_INDEX) ? NULL : \
+								 DictAffixData(d) + ((uint32 *) DictAffixDataOffset(d))[i])
+
 #define DictAffixOffset(d)		((d)->data + (d)->AffixOffsetStart)
 #define DictAffix(d)			((d)->data + (d)->AffixStart)
 #define DictAffixGet(d, i)		(((i) == ISPELL_INVALID_INDEX) ? NULL : \
 								 DictAffix(d) + ((uint32 *) DictAffixOffset(d))[i])
+
 #define DictDictNodes(d)		((d)->data + (d)->DictNodesStart)
 #define DictPrefixNodes(d)		((d)->data + (d)->PrefixNodesStart)
 #define DictSuffixNodes(d)		((d)->data + (d)->SuffixNodesStart)
+#define DictNodeGet(node_start, of) (((of) == ISPELL_INVALID_OFFSET) ? NULL : (node_start) + (of))
+
 #define DictCompoundAffix(d)	((d)->data + (d)->CompoundAffixStart)
 
 /*
- * IspellDictBuild is used to initialize IspellDict struct.  This is a
+ * IspellDictBuild is used to initialize IspellDictData struct.  This is a
  * temprorary structure which is setup by NIStartBuild() and released by
  * NIFinishBuild().
  */
@@ -308,44 +319,9 @@ typedef struct IspellDictBuild
 	int			nCompoundAffix;	/* number of entries of CompoundAffix */
 } IspellDictBuild;
 
-#define AffixGet(d, i)			(((i) == ISPELL_INVALID_INDEX) ? NULL : (d)->Affix + (d)->AffixOffset[i])
 #define AffixDataGet(d, i)		((d)->AffixData + (d)->AffixDataOffset[i])
 
-typedef struct
-{
-	/* Allocated size of IspellDict */
-	uint32		size;
-
-	AffixNode  *Suffix;
-	AffixNode  *Prefix;
-
-	SPNode	   *Dictionary;
-	/* Array of sets of affixes */
-	char	  **AffixData;
-	int			lenAffixData;
-	int			nAffixData;
-	bool		useFlagAliases;
-
-	CMPDAffix  *CompoundAffix;
-
-	bool		usecompound;
-	FlagMode	flagMode;
-
-	/* These are used to allocate "compact" data without palloc overhead */
-	char	   *firstfree;		/* first free address (always maxaligned) */
-	size_t		avail;			/* free space remaining at firstfree */
-
-	/*
-	 * data stores:
-	 * - array of sets of affixes
-	 * - array of AFFIX
-	 */
-	char		data[FLEXIBLE_ARRAY_MEMBER];
-} IspellDict;
-
-#define IspellDictHdrSize	(offsetof(IspellDict, data))
-
-extern TSLexeme *NINormalizeWord(IspellDict *Conf, char *word);
+extern TSLexeme *NINormalizeWord(IspellDictData *Conf, char *word);
 
 extern void NIStartBuild(IspellDictBuild *ConfBuild);
 extern void NIImportAffixes(IspellDictBuild *ConfBuild, const char *filename);
