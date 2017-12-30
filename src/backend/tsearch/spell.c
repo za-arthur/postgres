@@ -1951,11 +1951,13 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 	int			i;
 	int			nchar = 0;
 	uint8		lastchar = '\0';
+	NodeArray  *array;
+	uint32		rs_offset;
 	AffixNode  *rs;
 	AffixNodeData *data;
 	int			lownew = low;
 	int			naff;
-	AFFIX	  **aff;
+	uint32	   *aff;
 
 	for (i = low; i < high; i++)
 		if (Conf->Affix[i].replen > level && lastchar != GETCHAR(Conf->Affix + i, level, type))
@@ -1967,12 +1969,20 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 	if (!nchar)
 		return ISPELL_INVALID_OFFSET;
 
-	aff = (AFFIX **) tmpalloc(sizeof(AFFIX *) * (high - low + 1));
+	if (type == FF_SUFFIX)
+		array = &ConfBuild->SuffixNodes;
+	else
+		array = &ConfBuild->PrefixNodes;
+
+	aff = (uint32 *) tmpalloc(sizeof(uint32) * (high - low + 1));
 	naff = 0;
 
-	rs = (AffixNode *) cpalloc0(ANHRDSZ + nchar * sizeof(AffixNodeData));
+	rs_offset = NIAllocateNode(ConfBuild, array, nchar, sizeof(AffixNodeData),
+							   ANHRDSZ);
+	rs = (AffixNode *) NodeArrayGet(array, rs_offset);
 	rs->length = nchar;
-	data = rs->data;
+	rs->isvoid = 0;
+	data = (AffixNodeData *) rs->data;
 
 	lastchar = '\0';
 	for (i = low; i < high; i++)
@@ -1982,16 +1992,19 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 			{
 				if (lastchar)
 				{
-					/* Next level of the prefix tree */
-					data->node = mkANode(Conf, ConfBuild, lownew, i, level + 1,
-										 type);
+					data->naff = naff;
 					if (naff)
 					{
-						data->naff = naff;
-						data->aff = (AFFIX **) cpalloc(sizeof(AFFIX *) * naff);
-						memcpy(data->aff, aff, sizeof(AFFIX *) * naff);
+						NIAllocateNodeAffixes(array, naff);
+						memcpy(data->aff, aff, sizeof(uint32) * naff);
 						naff = 0;
 					}
+
+					/* Next level of the prefix tree */
+					data->node_offset = mkANode(ConfBuild, lownew, i,
+												level + 1, type);
+
+					/* Handle next data node */
 					data++;
 					lownew = i;
 				}
@@ -2031,7 +2044,7 @@ mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 	int			start = (issuffix) ? startsuffix : 0;
 	int			end = (issuffix) ? ConfBuild->nAffix : startsuffix;
 	uint32		node_offset;
-	NodeArray  *AffixNodes;
+	NodeArray  *array;
 	AffixNode  *Affix;
 	AffixNodeData *AffixData;
 
@@ -2041,13 +2054,13 @@ mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 			cnt++;
 
 	if (issuffix)
-		AffixNodes = &ConfBuild->SuffixNodes;
+		array = &ConfBuild->SuffixNodes;
 	else
-		AffixNodes = &ConfBuild->PrefixNodes;
+		array = &ConfBuild->PrefixNodes;
 
-	node_offset = NIAllocateNode(ConfBuild, AffixNodes, 1,
+	node_offset = NIAllocateNode(ConfBuild, array, 1,
 								 sizeof(AffixNodeData), ANHRDSZ);
-	Affix = (AffixNode *) NodeArrayGet(AffixNodes, node_offset);
+	Affix = (AffixNode *) NodeArrayGet(array, node_offset);
 
 	Affix->length = 1;
 	Affix->isvoid = 1;
@@ -2058,7 +2071,7 @@ mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 	if (cnt == 0)
 		return;
 
-	NIAllocateNodeAffixes(AffixNodes, cnt);
+	NIAllocateNodeAffixes(array, cnt);
 
 	cnt = 0;
 	for (i = start; i < end; i++)
