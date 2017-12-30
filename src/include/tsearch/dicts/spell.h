@@ -277,7 +277,7 @@ typedef struct IspellDictBuild
 	NodeArray	PrefixNodes;
 
 	/* Prefix tree which stores a suffix list */
-	NodeArray	PrefixNodes;
+	NodeArray	SuffixNodes;
 
 	/* Array of compound affixes */
 	CMPDAffix  *CompoundAffix;
