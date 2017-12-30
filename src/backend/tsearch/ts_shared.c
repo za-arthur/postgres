@@ -72,7 +72,7 @@ refind_entry:
 	/* Dictionary wasn't load into memory */
 	if (!found)
 	{
-		const void *ispell_dict;
+		void	   *ispell_dict;
 		Size		ispell_size;
 
 		/* Try to get exclusive lock */

@@ -15,10 +15,10 @@
 
 #include "c.h"
 
-typedef const void *(*ispell_build_callback) (void *dictbuild,
-											  const char *dictfile,
-											  const char *afffile,
-											  Size *size);
+typedef void *(*ispell_build_callback) (void *dictbuild,
+										const char *dictfile,
+										const char *afffile,
+										Size *size);
 
 extern void *ispell_shmem_location(void *dictbuild,
 								   const char *dictfile, const char *afffile,

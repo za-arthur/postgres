@@ -427,26 +427,6 @@ NIAllocateNode(IspellDictBuild *ConfBuild, NodeArray *array, uint32 length,
 }
 
 /*
- * Allocate space for affix indexes array of AffixNodeData.
- *
- * array: NodeArray where to allocate indexes array.
- * length: length of allocated array.
- */
-static void
-NIAllocateNodeAffixes(NodeArray *array, uint32 length)
-{
-	uint32		size;
-
-	size = length * sizeof(uint32);
-
-	if (array->NodesEnd + size >= array->NodesSize)
-	{
-		array->NodesSize = Max(array->NodesSize * 2, array->NodesSize + size);
-		array->Nodes = (char *) repalloc(array->Nodes, array->NodesSize);
-	}
-}
-
-/*
  * Gets an affix flag from the set of affix flags (sflagset).
  *
  * Several flags can be stored in a single string. Flags can be represented by:
@@ -468,7 +448,7 @@ NIAllocateNodeAffixes(NodeArray *array, uint32 length)
  * sflag: returns an affix flag from sflagset.
  */
 static void
-getNextFlagFromString(FlagMode *flagmode, char **sflagset, char *sflag)
+getNextFlagFromString(FlagMode flagmode, char **sflagset, char *sflag)
 {
 	int32		s;
 	char	   *next,
@@ -572,7 +552,7 @@ getNextFlagFromString(FlagMode *flagmode, char **sflagset, char *sflag)
  * false.
  */
 static bool
-IsAffixFlagInUse(FlagMode *flagmode, char *sflagset, const char *affixflag)
+IsAffixFlagInUse(FlagMode flagmode, char *sflagset, const char *affixflag)
 {
 	char	   *flagcur = sflagset;
 	char		flag[BUFSIZ];
@@ -582,7 +562,7 @@ IsAffixFlagInUse(FlagMode *flagmode, char *sflagset, const char *affixflag)
 
 	while (*flagcur)
 	{
-		getNextFlagFromString(Conf->flagMode, &flagcur, flag);
+		getNextFlagFromString(flagmode, &flagcur, flag);
 		/* Compare first affix flag in flagcur with affixflag */
 		if (strcmp(flag, affixflag) == 0)
 			return true;
@@ -836,7 +816,7 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 	size = AFFIXHDRSZ + flaglen + 1 /* \0 */ + findlen + 1 /* \0 */ +
 		repllen + 1 /* \0 */;
 
-	Affix = (AFFIX *) tmpalloc(affixsize);
+	Affix = (AFFIX *) tmpalloc(size);
 	ConfBuild->Affix[ConfBuild->nAffix] = Affix;
 
 	/* This affix rule can be applied for words with any ending */
@@ -1515,7 +1495,7 @@ NIImportOOAffixes(IspellDictBuild *ConfBuild, const char *filename)
 			/* Get flags after '/' (flags are case sensitive) */
 			if ((ptr = strchr(repl, '/')) != NULL)
 				aflg |= getCompoundAffixFlagValue(ConfBuild,
-												  getAffixFlagSet(ConfBuild->dict,
+												  getAffixFlagSet(ConfBuild,
 																  ptr + 1));
 			/* Get lowercased version of string before '/' */
 			prepl = lowerstr_ctx(ConfBuild, repl);
@@ -1714,24 +1694,27 @@ MergeAffix(IspellDictBuild *ConfBuild, int a1, int a2)
 	else if (*AffixDataGet(ConfBuild, a2) == '\0')
 		return a1;
 
-	if (Conf->flagMode == FM_NUM)
+	if (ConfBuild->dict->flagMode == FM_NUM)
 	{
-		len = strlen(Conf->AffixData[a1]) + strlen(Conf->AffixData[a2]) +
-			1 /* comma */;
+		len = strlen(AffixDataGet(ConfBuild, a1)) + 1 /* comma */ +
+			  strlen(AffixDataGet(ConfBuild, a2));
 		ptr = tmpalloc(len + 1 /* \0 */);
-		sprintf(ptr, "%s,%s", Conf->AffixData[a1], Conf->AffixData[a2]);
+		sprintf(ptr, "%s,%s", AffixDataGet(ConfBuild, a1),
+				AffixDataGet(ConfBuild, a2));
 	}
 	else
 	{
-		len = strlen(Conf->AffixData[a1]) + strlen(Conf->AffixData[a2]);
+		len = strlen(AffixDataGet(ConfBuild, a1)) +
+			  strlen(AffixDataGet(ConfBuild, a2));
 		ptr = tmpalloc(len + 1 /* \0 */ );
-		sprintf(ptr, "%s%s", Conf->AffixData[a1], Conf->AffixData[a2]);
+		sprintf(ptr, "%s%s", AffixDataGet(ConfBuild, a1),
+				AffixDataGet(ConfBuild, a2));
 	}
 
 	NIAddAffixSet(ConfBuild, ptr, len);
 	pfree(ptr);
 
-	return ConfBuild->AffixData->length - 1;
+	return ConfBuild->nAffixData - 1;
 }
 
 /*
@@ -1739,9 +1722,9 @@ MergeAffix(IspellDictBuild *ConfBuild, int a1, int a2)
  * flags with the given index.
  */
 static uint32
-makeCompoundFlags(IspellDict *Conf, IspellDictBuild *ConfBuild, int affix)
+makeCompoundFlags(IspellDictBuild *ConfBuild, int affix)
 {
-	char	   *str = Conf->AffixData[affix];
+	char	   *str = AffixDataGet(ConfBuild, affix);
 
 	return (getCompoundAffixFlagValue(ConfBuild, str) & FF_COMPOUNDFLAGMASK);
 }
@@ -1780,7 +1763,7 @@ mkSPNode(IspellDictBuild *ConfBuild, int low, int high, int level)
 
 	rs_offset = NIAllocateNode(ConfBuild, &ConfBuild->DictNodes, nchar,
 							   sizeof(SPNodeData), SPNHDRSZ);
-	rs = NodeArrayGet(&ConfBuild->DictNodes, rs_offset);
+	rs = (SPNode *) NodeArrayGet(&ConfBuild->DictNodes, rs_offset);
 	rs->length = nchar;
 	data = rs->data;
 
@@ -1813,7 +1796,7 @@ mkSPNode(IspellDictBuild *ConfBuild, int low, int high, int level)
 					 */
 
 					clearCompoundOnly = (FF_COMPOUNDONLY & data->compoundflag
-										 & makeCompoundFlags(Conf, ConfBuild,
+										 & makeCompoundFlags(ConfBuild,
 															 ConfBuild->Spell[i]->p.d.affix))
 						? false : true;
 					data->affix = MergeAffix(ConfBuild, data->affix,
@@ -1823,7 +1806,7 @@ mkSPNode(IspellDictBuild *ConfBuild, int low, int high, int level)
 					data->affix = ConfBuild->Spell[i]->p.d.affix;
 				data->isword = 1;
 
-				data->compoundflag = makeCompoundFlags(Conf, ConfBuild,
+				data->compoundflag = makeCompoundFlags(ConfBuild,
 													   data->affix);
 
 				if ((data->compoundflag & FF_COMPOUNDONLY) &&
@@ -1956,14 +1939,13 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 	AffixNode  *rs;
 	AffixNodeData *data;
 	int			lownew = low;
-	int			naff;
-	uint32	   *aff;
 
 	for (i = low; i < high; i++)
-		if (Conf->Affix[i].replen > level && lastchar != GETCHAR(Conf->Affix + i, level, type))
+		if (ConfBuild->Affix[i]->replen > level &&
+			lastchar != GETCHAR(ConfBuild->Affix[i], level, type))
 		{
 			nchar++;
-			lastchar = GETCHAR(Conf->Affix + i, level, type);
+			lastchar = GETCHAR(ConfBuild->Affix[i], level, type);
 		}
 
 	if (!nchar)
@@ -1974,62 +1956,49 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 	else
 		array = &ConfBuild->PrefixNodes;
 
-	aff = (uint32 *) tmpalloc(sizeof(uint32) * (high - low + 1));
-	naff = 0;
-
 	rs_offset = NIAllocateNode(ConfBuild, array, nchar, sizeof(AffixNodeData),
 							   ANHRDSZ);
 	rs = (AffixNode *) NodeArrayGet(array, rs_offset);
 	rs->length = nchar;
 	rs->isvoid = 0;
 	data = (AffixNodeData *) rs->data;
+	data->affstart = ISPELL_INVALID_INDEX;
+	data->affend = ISPELL_INVALID_INDEX;
 
 	lastchar = '\0';
 	for (i = low; i < high; i++)
-		if (Conf->Affix[i].replen > level)
+		if (ConfBuild->Affix[i]->replen > level)
 		{
-			if (lastchar != GETCHAR(Conf->Affix + i, level, type))
+			if (lastchar != GETCHAR(ConfBuild->Affix[i], level, type))
 			{
 				if (lastchar)
 				{
-					data->naff = naff;
-					if (naff)
-					{
-						NIAllocateNodeAffixes(array, naff);
-						memcpy(data->aff, aff, sizeof(uint32) * naff);
-						naff = 0;
-					}
-
 					/* Next level of the prefix tree */
 					data->node_offset = mkANode(ConfBuild, lownew, i,
 												level + 1, type);
 
 					/* Handle next data node */
 					data++;
+					data->affstart = ISPELL_INVALID_INDEX;
+					data->affend = ISPELL_INVALID_INDEX;
 					lownew = i;
 				}
-				lastchar = GETCHAR(Conf->Affix + i, level, type);
+				lastchar = GETCHAR(ConfBuild->Affix[i], level, type);
 			}
-			data->val = GETCHAR(Conf->Affix + i, level, type);
-			if (Conf->Affix[i].replen == level + 1)
+			data->val = GETCHAR(ConfBuild->Affix[i], level, type);
+			if (ConfBuild->Affix[i]->replen == level + 1)
 			{					/* affix stopped */
-				aff[naff++] = Conf->Affix + i;
+				if (data->affstart == ISPELL_INVALID_INDEX)
+					data->affstart = i;
+				else
+					data->affend = i;
 			}
 		}
 
 	/* Next level of the prefix tree */
-	data->node = mkANode(Conf, ConfBuild, lownew, high, level + 1, type);
-	if (naff)
-	{
-		data->naff = naff;
-		data->aff = (AFFIX **) cpalloc(sizeof(AFFIX *) * naff);
-		memcpy(data->aff, aff, sizeof(AFFIX *) * naff);
-		naff = 0;
-	}
+	data->node_offset = mkANode(ConfBuild, lownew, high, level + 1, type);
 
-	pfree(aff);
-
-	return rs;
+	return rs_offset;
 }
 
 /*
@@ -2039,19 +2008,13 @@ mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 static void
 mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 {
-	int			i,
-				cnt = 0;
+	int			i;
 	int			start = (issuffix) ? startsuffix : 0;
 	int			end = (issuffix) ? ConfBuild->nAffix : startsuffix;
 	uint32		node_offset;
 	NodeArray  *array;
 	AffixNode  *Affix;
 	AffixNodeData *AffixData;
-
-	/* Count affixes with empty replace string */
-	for (i = start; i < end; i++)
-		if (ConfBuild->Affix[i]->replen == 0)
-			cnt++;
 
 	if (issuffix)
 		array = &ConfBuild->SuffixNodes;
@@ -2065,20 +2028,16 @@ mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 	Affix->length = 1;
 	Affix->isvoid = 1;
 	AffixData = (AffixNodeData *) Affix->data;
-	AffixData->naff = cnt;
+	AffixData->affstart = ISPELL_INVALID_INDEX;
+	AffixData->affend = ISPELL_INVALID_INDEX;
 
-	/* There is not affixes with empty replace string */
-	if (cnt == 0)
-		return;
-
-	NIAllocateNodeAffixes(array, cnt);
-
-	cnt = 0;
 	for (i = start; i < end; i++)
 		if (ConfBuild->Affix[i]->replen == 0)
 		{
-			AffixData->aff[cnt] = i;
-			cnt++;
+			if (AffixData->affstart == ISPELL_INVALID_INDEX)
+				AffixData->affstart = i;
+			else
+				AffixData->affend = i;
 		}
 }
 
@@ -2112,6 +2071,8 @@ void
 NISortAffixes(IspellDictBuild *ConfBuild)
 {
 	AFFIX	   *Affix;
+	AffixNode  *voidPrefix,
+			   *voidSuffix;
 	size_t		i;
 	CMPDAffix  *ptr;
 	int			firstsuffix = ConfBuild->nAffix;
@@ -2136,9 +2097,9 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 		if ((Affix->flagflags & FF_COMPOUNDFLAG) && Affix->replen > 0 &&
 			isAffixInUse(ConfBuild, AffixFieldFlag(Affix)))
 		{
-			if (ptr == Conf->CompoundAffix ||
+			if (ptr == ConfBuild->CompoundAffix ||
 				ptr->issuffix != (ptr - 1)->issuffix ||
-				strbncmp((const unsigned char *) (ptr - 1)->affix,
+				strbncmp((const unsigned char *) AffixFieldRepl(ConfBuild->Affix[(ptr - 1)->affix]),
 						 (const unsigned char *) AffixFieldRepl(Affix),
 						 (ptr - 1)->len))
 			{
@@ -2151,14 +2112,20 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 		}
 	}
 	ptr->affix = ISPELL_INVALID_INDEX;
-	ConfBuild->CompoundAffix = (CMPDAffix *) repalloc(Conf->CompoundAffix,
-												 sizeof(CMPDAffix) * (ptr - Conf->CompoundAffix + 1));
+	ConfBuild->CompoundAffix = (CMPDAffix *) repalloc(ConfBuild->CompoundAffix,
+								sizeof(CMPDAffix) * (ptr - ConfBuild->CompoundAffix + 1));
 
 	/* Start build a prefix tree */
-	mkVoidAffix(Conf, true, firstsuffix);
-	mkVoidAffix(Conf, false, firstsuffix);
-	Conf->Prefix = mkANode(ConfBuild, 0, firstsuffix, 0, FF_PREFIX);
-	Conf->Suffix = mkANode(ConfBuild, firstsuffix, Conf->naffixes, 0, FF_SUFFIX);
+	mkVoidAffix(ConfBuild, true, firstsuffix);
+	mkVoidAffix(ConfBuild, false, firstsuffix);
+
+	voidPrefix = (AffixNode *) NodeArrayGet(&ConfBuild->PrefixNodes, 0);
+	voidSuffix = (AffixNode *) NodeArrayGet(&ConfBuild->SuffixNodes, 0);
+
+	voidPrefix->data[0].node_offset = mkANode(ConfBuild, 0, firstsuffix, 0,
+											  FF_PREFIX);
+	voidSuffix->data[0].node_offset = mkANode(ConfBuild, firstsuffix,
+											  ConfBuild->nAffix, 0, FF_SUFFIX);
 }
 
 static AffixNodeData *
