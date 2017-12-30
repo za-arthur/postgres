@@ -18,7 +18,7 @@
 #include "tsearch/dicts/regis.h"
 #include "tsearch/ts_public.h"
 
-#define ISPELL_INVALID_INDEX	(-1)
+#define ISPELL_INVALID_INDEX	(0xFFFFF)
 #define ISPELL_INVALID_OFFSET	(0xFFFFFFFF)
 
 /*
@@ -145,11 +145,11 @@ struct AffixNode;
 
 typedef struct
 {
-	uint32		val:8,
-				naff:24;
+	uint8		val;
+	uint32		affstart;
+	uint32		affend;
 	/* Offset to a node of the PrefixNodes or SuffixNodes field */
 	uint32		node_offset;
-	uint32		aff[FLEXIBLE_ARRAY_MEMBER];
 } AffixNodeData;
 
 #define ANDHDRSZ				(offsetof(AffixNodeData, aff))
@@ -159,7 +159,7 @@ typedef struct AffixNode
 {
 	uint32		isvoid:1,
 				length:31;
-	char		data[FLEXIBLE_ARRAY_MEMBER];
+	AffixNodeData data[FLEXIBLE_ARRAY_MEMBER];
 } AffixNode;
 
 #define ANHRDSZ		   (offsetof(AffixNode, data))
@@ -171,7 +171,7 @@ typedef struct NodeArray
 	uint32		NodesEnd;	/* end of data in Nodes */
 } NodeArray;
 
-#define NodeArrayGet(na, of)		(((of) == ISPELL_INVALID_OFFSET) ? NULL : (na)->Nodes + (of))
+#define NodeArrayGet(na, of)	(((of) == ISPELL_INVALID_OFFSET) ? NULL : (na)->Nodes + (of))
 
 typedef struct
 {

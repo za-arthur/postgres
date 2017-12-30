@@ -32,7 +32,7 @@ typedef struct
  *
  * Result is palloc'ed.
  */
-static const void *
+static void *
 dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
 			  Size *size)
 {
@@ -63,25 +63,12 @@ dispell_init(PG_FUNCTION_ARGS)
 {
 	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
 	DictISpell *d;
-	const	   *dictfile = NULL,
+	char	   *dictfile = NULL,
 			   *afffile = NULL;
 	bool		stoploaded = false;
 	ListCell   *l;
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
-
-	NIStartBuild(&(d->build));
-
-
-
-//	ispell_shmem_location("test1","test2", dispell_build);
-
-//	NIImportDictionary(&(d->build),
-//					   get_tsearch_config_filename(defGetString(defel),
-//												   "dict"));
-//	NIImportAffixes(&(d->build),
-//					get_tsearch_config_filename(defGetString(defel),
-//												"affix"));
 
 	foreach(l, dictoptions)
 	{
@@ -121,10 +108,9 @@ dispell_init(PG_FUNCTION_ARGS)
 		}
 	}
 
-	if (dictfile && affile)
+	if (dictfile && afffile)
 	{
-		NISortDictionary(&(d->build));
-		NISortAffixes(&(d->build));
+		ispell_shmem_location(&d->build, dictfile, afffile, dispell_build);
 	}
 	else if (!afffile)
 	{
@@ -138,8 +124,6 @@ dispell_init(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("missing DictFile parameter")));
 	}
-
-	NIFinishBuild(&(d->build));
 
 	PG_RETURN_POINTER(d);
 }
@@ -158,8 +142,10 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	if (len <= 0)
 		PG_RETURN_POINTER(NULL);
 
+	PG_RETURN_POINTER(NULL);
+
 	txt = lowerstr_with_len(in, len);
-	res = NINormalizeWord(&(d->obj), txt);
+//	res = NINormalizeWord(&(d->obj), txt);
 
 	if (res == NULL)
 		PG_RETURN_POINTER(NULL);
