@@ -409,7 +409,7 @@ NIAllocateNode(IspellDictBuild *ConfBuild, NodeArray *array, uint32 length,
 
 	if (array->NodesSize == 0)
 	{
-		array->NodesSize = size * 8;	/* Reserve space for next levels of the
+		array->NodesSize = size * 32;	/* Reserve space for next levels of the
 										 * prefix tree */
 		array->Nodes = (char *) tmpalloc(array->NodesSize);
 		array->NodesEnd = 0;
@@ -424,6 +424,26 @@ NIAllocateNode(IspellDictBuild *ConfBuild, NodeArray *array, uint32 length,
 	array->NodesEnd += size;
 
 	return node_offset;
+}
+
+/*
+ * Allocate space for affix indexes array of AffixNodeData.
+ *
+ * array: NodeArray where to allocate indexes array.
+ * length: length of allocated array.
+ */
+static void
+NIAllocateNodeAffixes(NodeArray *array, uint32 length)
+{
+	uint32		size;
+
+	size = length * sizeof(uint32);
+
+	if (array->NodesEnd + size >= array->NodesSize)
+	{
+		array->NodesSize = Max(array->NodesSize * 2, array->NodesSize + size);
+		array->Nodes = (char *) repalloc(array->Nodes, array->NodesSize);
+	}
 }
 
 /*
@@ -1922,10 +1942,11 @@ NISortDictionary(IspellDictBuild *ConfBuild)
  * high: upper index of the Conf->Affix array.
  * level: current prefix tree level.
  * type: FF_SUFFIX or FF_PREFIX.
+ *
+ * Returns an offset in nodes array.
  */
-static AffixNode *
-mkANode(IspellDict *Conf, IspellDictBuild *ConfBuild,
-		int low, int high, int level, int type)
+static uint32
+mkANode(IspellDictBuild *ConfBuild, int low, int high, int level, int type)
 {
 	int			i;
 	int			nchar = 0;
@@ -1944,7 +1965,7 @@ mkANode(IspellDict *Conf, IspellDictBuild *ConfBuild,
 		}
 
 	if (!nchar)
-		return NULL;
+		return ISPELL_INVALID_OFFSET;
 
 	aff = (AFFIX **) tmpalloc(sizeof(AFFIX *) * (high - low + 1));
 	naff = 0;
@@ -2009,39 +2030,41 @@ mkVoidAffix(IspellDictBuild *ConfBuild, bool issuffix, int startsuffix)
 				cnt = 0;
 	int			start = (issuffix) ? startsuffix : 0;
 	int			end = (issuffix) ? ConfBuild->nAffix : startsuffix;
-	AffixNode  *Affix = (AffixNode *) palloc0(ANHRDSZ + sizeof(AffixNodeData));
+	uint32		node_offset;
+	NodeArray  *AffixNodes;
+	AffixNode  *Affix;
+	AffixNodeData *AffixData;
 
 	/* Count affixes with empty replace string */
 	for (i = start; i < end; i++)
 		if (ConfBuild->Affix[i]->replen == 0)
 			cnt++;
 
+	if (issuffix)
+		AffixNodes = &ConfBuild->SuffixNodes;
+	else
+		AffixNodes = &ConfBuild->PrefixNodes;
+
+	node_offset = NIAllocateNode(ConfBuild, AffixNodes, 1,
+								 sizeof(AffixNodeData), ANHRDSZ);
+	Affix = (AffixNode *) NodeArrayGet(AffixNodes, node_offset);
+
 	Affix->length = 1;
 	Affix->isvoid = 1;
-
-	if (issuffix)
-	{
-		Affix->data->node = ConfBuild->Suffix;
-		ConfBuild->Suffix = Affix;
-	}
-	else
-	{
-		Affix->data->node = ConfBuild->Prefix;
-		ConfBuild->Prefix = Affix;
-	}
+	AffixData = (AffixNodeData *) Affix->data;
+	AffixData->naff = cnt;
 
 	/* There is not affixes with empty replace string */
 	if (cnt == 0)
 		return;
 
-	Affix->data->aff = (AFFIX **) cpalloc(sizeof(AFFIX *) * cnt);
-	Affix->data->naff = (uint32) cnt;
+	NIAllocateNodeAffixes(AffixNodes, cnt);
 
 	cnt = 0;
 	for (i = start; i < end; i++)
 		if (ConfBuild->Affix[i]->replen == 0)
 		{
-			Affix->data->aff[cnt] = ConfBuild->Affix + i;
+			AffixData->aff[cnt] = i;
 			cnt++;
 		}
 }
@@ -2119,10 +2142,10 @@ NISortAffixes(IspellDictBuild *ConfBuild)
 												 sizeof(CMPDAffix) * (ptr - Conf->CompoundAffix + 1));
 
 	/* Start build a prefix tree */
-	Conf->Prefix = mkANode(Conf, ConfBuild, 0, firstsuffix, 0, FF_PREFIX);
-	Conf->Suffix = mkANode(Conf, ConfBuild, firstsuffix, Conf->naffixes, 0, FF_SUFFIX);
 	mkVoidAffix(Conf, true, firstsuffix);
 	mkVoidAffix(Conf, false, firstsuffix);
+	Conf->Prefix = mkANode(ConfBuild, 0, firstsuffix, 0, FF_PREFIX);
+	Conf->Suffix = mkANode(ConfBuild, firstsuffix, Conf->naffixes, 0, FF_SUFFIX);
 }
 
 static AffixNodeData *
