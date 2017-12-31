@@ -16,6 +16,7 @@
 #include "commands/defrem.h"
 #include "tsearch/dicts/spell.h"
 #include "tsearch/ts_locale.h"
+#include "tsearch/ts_shared.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
 
@@ -23,22 +24,24 @@
 typedef struct
 {
 	StopList	stoplist;
-	IspellDict	obj;
+	IspellDictBuild obj;
 } DictISpell;
+
+static void *dispell_build(void *dictbuild,
+						   const char *dictfile, const char *afffile,
+						   Size *size);
 
 Datum
 dispell_init(PG_FUNCTION_ARGS)
 {
 	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
 	DictISpell *d;
-	bool		affloaded = false,
-				dictloaded = false,
-				stoploaded = false;
+	char	   *dictfile = NULL,
+			   *afffile = NULL;
+	bool		stoploaded = false;
 	ListCell   *l;
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
-
-	NIStartBuild(&(d->obj));
 
 	foreach(l, dictoptions)
 	{
@@ -46,25 +49,19 @@ dispell_init(PG_FUNCTION_ARGS)
 
 		if (pg_strcasecmp(defel->defname, "DictFile") == 0)
 		{
-			if (dictloaded)
+			if (dictfile)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple DictFile parameters")));
-			NIImportDictionary(&(d->obj),
-							   get_tsearch_config_filename(defGetString(defel),
-														   "dict"));
-			dictloaded = true;
+			dictfile = get_tsearch_config_filename(defGetString(defel), "dict");
 		}
 		else if (pg_strcasecmp(defel->defname, "AffFile") == 0)
 		{
-			if (affloaded)
+			if (afffile)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 						 errmsg("multiple AffFile parameters")));
-			NIImportAffixes(&(d->obj),
-							get_tsearch_config_filename(defGetString(defel),
-														"affix"));
-			affloaded = true;
+			afffile = get_tsearch_config_filename(defGetString(defel), "affix");
 		}
 		else if (pg_strcasecmp(defel->defname, "StopWords") == 0)
 		{
@@ -84,12 +81,16 @@ dispell_init(PG_FUNCTION_ARGS)
 		}
 	}
 
-	if (affloaded && dictloaded)
+	if (dictfile && afffile)
 	{
-		NISortDictionary(&(d->obj));
-		NISortAffixes(&(d->obj));
+		IspellDictData *dict;
+
+		dict = ispell_shmem_location(&d->obj, dictfile, afffile,
+									 dispell_build);
+
+		d->obj.dict = (IspellDictData *) dict;
 	}
-	else if (!affloaded)
+	else if (!afffile)
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -101,8 +102,6 @@ dispell_init(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 				 errmsg("missing DictFile parameter")));
 	}
-
-	NIFinishBuild(&(d->obj));
 
 	PG_RETURN_POINTER(d);
 }
@@ -122,7 +121,7 @@ dispell_lexize(PG_FUNCTION_ARGS)
 		PG_RETURN_POINTER(NULL);
 
 	txt = lowerstr_with_len(in, len);
-	res = NINormalizeWord(&(d->obj), txt);
+	res = NINormalizeWord(d->obj.dict, txt);
 
 	if (res == NULL)
 		PG_RETURN_POINTER(NULL);
@@ -145,4 +144,37 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	cptr->lexeme = NULL;
 
 	PG_RETURN_POINTER(res);
+}
+
+/*
+ * Build the dictionary.
+ *
+ * Result is palloc'ed.
+ */
+static void *
+dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
+			  Size *size)
+{
+	IspellDictBuild *build = (IspellDictBuild *) dictbuild;
+
+	Assert(dictfile && afffile);
+
+	NIStartBuild(build);
+
+	/* Read files */
+	NIImportDictionary(build, dictfile);
+	NIImportAffixes(build, afffile);
+
+	/* Build persistent data to use by backends */
+	NISortDictionary(build);
+	NISortAffixes(build);
+
+	NICopyData(build);
+
+	/* Release temporary data */
+	NIFinishBuild(build);
+
+	/* Return the buffer and its size */
+	*size = build->dict_size;
+	return build->dict;
 }
