@@ -97,7 +97,6 @@ NIStartBuild(IspellDictBuild *ConfBuild)
 
 	/*
 	 * Allocate buffer for the dictionary in current context not in buildCxt.
-	 * Initially allocate 2MB for IspellDictData.
 	 */
 	dict_size = MAXALIGN(IspellDictDataHdrSize);
 	ConfBuild->dict = palloc0(dict_size);
