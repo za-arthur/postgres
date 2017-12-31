@@ -99,8 +99,8 @@ NIStartBuild(IspellDictBuild *ConfBuild)
 	 * Allocate buffer for the dictionary in current context not in buildCxt.
 	 * Initially allocate 2MB for IspellDictData.
 	 */
-	dict_size = IspellDictDataHdrSize;
-	ConfBuild->dict = palloc(dict_size);
+	dict_size = MAXALIGN(IspellDictDataHdrSize);
+	ConfBuild->dict = palloc0(dict_size);
 	ConfBuild->dict_size = dict_size;
 }
 
@@ -410,8 +410,10 @@ NIAddAffixSet(IspellDictBuild *ConfBuild, const char *AffixSet,
 														 sizeof(uint32) * ConfBuild->mAffixData);
 	}
 
+	ConfBuild->AffixDataOffset[ConfBuild->nAffixData] = ConfBuild->AffixDataEnd;
 	StrNCpy(AffixDataGet(ConfBuild, ConfBuild->nAffixData),
 			AffixSet, AffixSetLen + 1);
+
 	/* Save offset of the end of data */
 	ConfBuild->AffixDataEnd += AffixSetLen + 1;
 	ConfBuild->nAffixData++;
@@ -436,6 +438,7 @@ NIAllocateNode(IspellDictBuild *ConfBuild, NodeArray *array, uint32 length,
 	uint32		size;
 
 	size = sizeNodeHeader + length * sizeNodeData;
+	size = MAXALIGN(size);
 
 	if (array->NodesSize == 0)
 	{
@@ -1840,8 +1843,7 @@ mkSPNode(IspellDictBuild *ConfBuild, int low, int high, int level)
 					data->affix = ConfBuild->Spell[i]->p.d.affix;
 				data->isword = 1;
 
-				data->compoundflag = makeCompoundFlags(ConfBuild,
-													   data->affix);
+				data->compoundflag = makeCompoundFlags(ConfBuild, data->affix);
 
 				if ((data->compoundflag & FF_COMPOUNDONLY) &&
 					(data->compoundflag & FF_COMPOUNDFLAG) == 0)

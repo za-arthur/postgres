@@ -120,8 +120,6 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	if (len <= 0)
 		PG_RETURN_POINTER(NULL);
 
-	PG_RETURN_POINTER(NULL);
-
 	txt = lowerstr_with_len(in, len);
 	res = NINormalizeWord(d->obj.dict, txt);
 
