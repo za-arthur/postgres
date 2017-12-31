@@ -498,7 +498,7 @@ NIAddSpell(IspellDict *Conf, const char *word, const char *flag)
 	Conf->Spell[Conf->nspell] = (SPELL *) tmpalloc(SPELLHDRSZ + strlen(word) + 1);
 	strcpy(Conf->Spell[Conf->nspell]->word, word);
 	Conf->Spell[Conf->nspell]->p.flag = (*flag != '\0')
-		? MemoryContextStrdup(ConfBuild->buildCxt, flag) : VoidString;
+		? MemoryContextStrdup(Conf->buildCxt, flag) : VoidString;
 	Conf->nspell++;
 }
 
@@ -1040,7 +1040,7 @@ setCompoundAffixFlagValue(IspellDict *Conf, CompoundAffixFlag *entry,
 		entry->flag.i = i;
 	}
 	else
-		entry->flag.s = MemoryContextStrdup(ConfBuild->buildCxt, s);
+		entry->flag.s = MemoryContextStrdup(Conf->buildCxt, s);
 
 	entry->flagMode = Conf->flagMode;
 	entry->value = val;
