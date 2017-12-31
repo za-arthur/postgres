@@ -867,42 +867,14 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 	{
 		Affix->issimple = 0;
 		Affix->isregis = 1;
-//		RS_compile(&(Affix->reg.regis), (type == FF_SUFFIX),
-//				   *mask ? mask : VoidString);
+		/* TODO Compile regular expressions */
 	}
 	/* This affix rule will use regex_t to search word ending */
 	else
 	{
-//		int			masklen;
-//		int			wmasklen;
-//		int			err;
-//		pg_wchar   *wmask;
-//		char	   *tmask;
-
 		Affix->issimple = 0;
 		Affix->isregis = 0;
-//		tmask = (char *) tmpalloc(strlen(mask) + 3);
-//		if (type == FF_SUFFIX)
-//			sprintf(tmask, "%s$", mask);
-//		else
-//			sprintf(tmask, "^%s", mask);
-
-//		masklen = strlen(tmask);
-//		wmask = (pg_wchar *) tmpalloc((masklen + 1) * sizeof(pg_wchar));
-//		wmasklen = pg_mb2wchar_with_len(tmask, wmask, masklen);
-
-//		err = pg_regcomp(&(Affix->reg.regex), wmask, wmasklen,
-//						 REG_ADVANCED | REG_NOSUB,
-//						 DEFAULT_COLLATION_OID);
-//		if (err)
-//		{
-//			char		errstr[100];
-
-//			pg_regerror(err, &(Affix->reg.regex), errstr, sizeof(errstr));
-//			ereport(ERROR,
-//					(errcode(ERRCODE_INVALID_REGULAR_EXPRESSION),
-//					 errmsg("invalid regular expression: %s", errstr)));
-//		}
+		/* TODO Compile regular expressions */
 	}
 
 	Affix->flagflags = flagflags;

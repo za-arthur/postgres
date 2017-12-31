@@ -278,11 +278,6 @@ CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
 	 */
 	TsearchShmemInit();
 
-	/*
-	 * Set up shared memory to tsearch
-	 */
-	TsearchShmemInit();
-
 #ifdef EXEC_BACKEND
 
 	/*
