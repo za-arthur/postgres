@@ -76,6 +76,7 @@
  * in the ConfBuild->buildCxt context.
  */
 #define tmpalloc(sz)  MemoryContextAlloc(ConfBuild->buildCxt, (sz))
+#define tmpalloc0(sz)  MemoryContextAllocZero(ConfBuild->buildCxt, (sz))
 
 /*
  * Prepare for constructing an ISpell dictionary.
@@ -866,42 +867,12 @@ NIAddAffix(IspellDictBuild *ConfBuild, const char *flag, char flagflags,
 	{
 		Affix->issimple = 0;
 		Affix->isregis = 1;
-//		RS_compile(&(Affix->reg.regis), (type == FF_SUFFIX),
-//				   *mask ? mask : VoidString);
 	}
 	/* This affix rule will use regex_t to search word ending */
 	else
 	{
-//		int			masklen;
-//		int			wmasklen;
-//		int			err;
-//		pg_wchar   *wmask;
-//		char	   *tmask;
-
 		Affix->issimple = 0;
 		Affix->isregis = 0;
-//		tmask = (char *) tmpalloc(strlen(mask) + 3);
-//		if (type == FF_SUFFIX)
-//			sprintf(tmask, "%s$", mask);
-//		else
-//			sprintf(tmask, "^%s", mask);
-
-//		masklen = strlen(tmask);
-//		wmask = (pg_wchar *) tmpalloc((masklen + 1) * sizeof(pg_wchar));
-//		wmasklen = pg_mb2wchar_with_len(tmask, wmask, masklen);
-
-//		err = pg_regcomp(&(Affix->reg.regex), wmask, wmasklen,
-//						 REG_ADVANCED | REG_NOSUB,
-//						 DEFAULT_COLLATION_OID);
-//		if (err)
-//		{
-//			char		errstr[100];
-
-//			pg_regerror(err, &(Affix->reg.regex), errstr, sizeof(errstr));
-//			ereport(ERROR,
-//					(errcode(ERRCODE_INVALID_REGULAR_EXPRESSION),
-//					 errmsg("invalid regular expression: %s", errstr)));
-//		}
 	}
 
 	Affix->flagflags = flagflags;
@@ -2286,27 +2257,11 @@ CheckAffix(const char *word, size_t len, AFFIX *Affix, int flagflags, char *neww
 		return newword;
 	else if (Affix->isregis)
 	{
-//		if (RS_execute(&(Affix->reg.regis), newword))
-//			return newword;
+		/* TODO Regular expression search */
 	}
 	else
 	{
-//		int			err;
-//		pg_wchar   *data;
-//		size_t		data_len;
-//		int			newword_len;
-
-//		/* Convert data string to wide characters */
-//		newword_len = strlen(newword);
-//		data = (pg_wchar *) palloc((newword_len + 1) * sizeof(pg_wchar));
-//		data_len = pg_mb2wchar_with_len(newword, data, newword_len);
-
-//		if (!(err = pg_regexec(&(Affix->reg.regex), data, data_len, 0, NULL, 0, NULL, 0)))
-//		{
-//			pfree(data);
-//			return newword;
-//		}
-//		pfree(data);
+		/* TODO Regular expression search */
 	}
 
 	return NULL;
