@@ -3,7 +3,16 @@
  * dict_ispell.c
  *		Ispell dictionary interface
  *
- * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
+ * By default all Ispell dictionaries are stored in DSM. But if number of
+ * loaded dictionaries reached maximum allowed value then it will be
+ * allocated within its memory context (dictCtx).
+ *
+ * All necessary data are built within dispell_build() function. But
+ * structures for regular expressions are compiled on first demand and
+ * stored using AffixReg array. It is because regex_t and Regis cannot be
+ * stored in shared memory.
+ *
+ * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -14,6 +23,7 @@
 #include "postgres.h"
 
 #include "commands/defrem.h"
+#include "storage/dsm.h"
 #include "tsearch/dicts/spell.h"
 #include "tsearch/ts_locale.h"
 #include "tsearch/ts_shared.h"
@@ -24,7 +34,9 @@
 typedef struct
 {
 	StopList	stoplist;
-	IspellDictBuild obj;
+	IspellDictBuild build;
+	IspellDict	obj;
+	dsm_handle	dict_handle;
 } DictISpell;
 
 static void *dispell_build(void *dictbuild,
@@ -83,12 +95,42 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	if (dictfile && afffile)
 	{
-		IspellDictData *dict;
+		dsm_segment *seg;
+		uint32		naffix;
 
-		dict = ispell_shmem_location(&d->obj, dictfile, afffile,
-									 dispell_build);
+		d->dict_handle = ispell_shmem_location(&d->build, dictfile, afffile,
+											   dispell_build);
 
-		d->obj.dict = (IspellDictData *) dict;
+		/*
+		 * There is no space in shared memory, build the dictionary within its
+		 * memory context.
+		 */
+		if (d->dict_handle == DSM_HANDLE_INVALID)
+		{
+			Size		ispell_size;
+
+			d->obj.dict = (IspellDictData *) dispell_build(&d->build,
+														   dictfile, afffile,
+														   &ispell_size);
+			naffix = d->obj.dict->nAffix;
+		}
+		/* The dictionary was allocated in DSM */
+		else
+		{
+			IspellDictData *dict;
+
+			seg = dsm_attach(d->dict_handle);
+			dict = (IspellDictData *) dsm_segment_address(seg);
+
+			/* We need to save naffix here because seg will be detached */
+			naffix = dict->nAffix;
+
+			dsm_detach(seg);
+		}
+
+		d->obj.reg = (AffixReg *) palloc0(naffix * sizeof(AffixReg));
+		/* Current memory context is dictionary's private memory context */
+		d->obj.dictCtx = CurrentMemoryContext;
 	}
 	else if (!afffile)
 	{
@@ -112,6 +154,7 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	DictISpell *d = (DictISpell *) PG_GETARG_POINTER(0);
 	char	   *in = (char *) PG_GETARG_POINTER(1);
 	int32		len = PG_GETARG_INT32(2);
+	dsm_segment *seg = NULL;
 	char	   *txt;
 	TSLexeme   *res;
 	TSLexeme   *ptr,
@@ -120,11 +163,26 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	if (len <= 0)
 		PG_RETURN_POINTER(NULL);
 
+	/*
+	 * If the dictionary allocated in DSM, get a pointer to IspellDictData.
+	 * Otherwise d->obj.dict already points to IspellDictData allocated within
+	 * the dictionary's memory context.
+	 */
+	if (d->dict_handle != DSM_HANDLE_INVALID)
+	{
+		seg = dsm_attach(d->dict_handle);
+		d->obj.dict = (IspellDictData *) dsm_segment_address(seg);
+	}
+
 	txt = lowerstr_with_len(in, len);
-	res = NINormalizeWord(d->obj.dict, txt);
+	res = NINormalizeWord(&d->obj, txt);
 
 	if (res == NULL)
+	{
+		if (seg)
+			dsm_detach(seg);
 		PG_RETURN_POINTER(NULL);
+	}
 
 	cptr = res;
 	for (ptr = cptr; ptr->lexeme; ptr++)
@@ -143,6 +201,8 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	}
 	cptr->lexeme = NULL;
 
+	if (seg)
+		dsm_detach(seg);
 	PG_RETURN_POINTER(res);
 }
 

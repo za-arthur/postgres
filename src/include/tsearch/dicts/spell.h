@@ -18,15 +18,13 @@
 #include "tsearch/dicts/regis.h"
 #include "tsearch/ts_public.h"
 
-#define ISPELL_INVALID_INDEX	(0xFFFFF)
+#define ISPELL_INVALID_INDEX	(0x7FFFF)
 #define ISPELL_INVALID_OFFSET	(0xFFFFFFFF)
 
 /*
  * SPNode and SPNodeData are used to represent prefix tree (Trie) to store
  * a words list.
  */
-struct SPNode;
-
 typedef struct
 {
 	uint32		val:8,
@@ -97,14 +95,16 @@ typedef struct aff_struct
 				isregis:1,
 				flaglen:2;
 
-	/* 8 bytes could be too mach for repl and find, but who knows */
+	/* 8 bytes could be too mach for repl, find and mask, but who knows */
 	uint8		replen;
 	uint8		findlen;
+	uint8		masklen;
 
 	/*
 	 * fields stores the following data (each ends with \0):
 	 * - repl
 	 * - find
+	 * - mask
 	 * - flag - one character (if FM_CHAR),
 	 *          two characters (if FM_LONG),
 	 *          number, >= 0 and < 65536 (if FM_NUM).
@@ -114,15 +114,29 @@ typedef struct aff_struct
 
 #define AF_FLAG_MAXSIZE		5		/* strlen(65536) */
 #define AF_REPL_MAXSIZE		255		/* 8 bytes */
-#define AF_FIND_MAXSIZE		255		/* 8 bytes */
 
 #define AFFIXHDRSZ	(offsetof(AFFIX, fields))
 
 #define AffixFieldRepl(af)	((af)->fields)
 #define AffixFieldFind(af)	((af)->fields + (af)->replen + 1)
-#define AffixFieldFlag(af)	(AffixFieldFind(af) + (af)->findlen + 1)
+#define AffixFieldMask(af)	(AffixFieldFind(af) + (af)->findlen + 1)
+#define AffixFieldFlag(af)	(AffixFieldMask(af) + (af)->masklen + 1)
 #define AffixGetSize(af)	(AFFIXHDRSZ + (af)->replen + 1 + (af)->findlen + 1 \
-							 + strlen(AffixFieldFlag(af)) + 1)
+							 + (af)->masklen + 1 + strlen(AffixFieldFlag(af)) + 1)
+
+/*
+ * Stores compiled regular expression of affix. AffixReg uses mask field of
+ * AFFIX as a regular expression.
+ */
+typedef struct AffixReg
+{
+	bool		iscompiled;
+	union
+	{
+		regex_t		regex;
+		Regis		regis;
+	}			r;
+} AffixReg;
 
 /*
  * affixes use dictionary flags too
@@ -142,8 +156,6 @@ typedef struct aff_struct
  * AffixNode and AffixNodeData are used to represent prefix tree (Trie) to store
  * an affix list.
  */
-struct AffixNode;
-
 typedef struct
 {
 	uint8		val;
@@ -152,9 +164,6 @@ typedef struct
 	/* Offset to a node of the PrefixNodes or SuffixNodes field */
 	uint32		node_offset;
 } AffixNodeData;
-
-#define ANDHDRSZ				(offsetof(AffixNodeData, aff))
-#define AffixNodeDataSize(an)	(ANDHDRSZ + sizeof(uint32) * (an)->naff)
 
 typedef struct AffixNode
 {
@@ -259,7 +268,8 @@ typedef struct IspellDictData
 #define DictDictNodes(d)		((d)->data + (d)->DictNodesStart)
 #define DictPrefixNodes(d)		((d)->data + (d)->PrefixNodesStart)
 #define DictSuffixNodes(d)		((d)->data + (d)->SuffixNodesStart)
-#define DictNodeGet(node_start, of) (((of) == ISPELL_INVALID_OFFSET) ? NULL : (node_start) + (of))
+#define DictNodeGet(node_start, of) (((of) == ISPELL_INVALID_OFFSET) ? NULL : \
+									 (char *) (node_start) + (of))
 
 #define DictCompoundAffix(d)	((d)->data + (d)->CompoundAffixStart)
 
@@ -321,7 +331,28 @@ typedef struct IspellDictBuild
 
 #define AffixDataGet(d, i)		((d)->AffixData + (d)->AffixDataOffset[i])
 
-extern TSLexeme *NINormalizeWord(IspellDictData *Conf, char *word);
+/*
+ * IspellDict is used within NINormalizeWord.
+ */
+typedef struct IspellDict
+{
+	/*
+	 * Pointer to a DSM location of IspellDictData. Should be retreived per
+	 * every dispell_lexize() call.
+	 */
+	IspellDictData *dict;
+	/*
+	 * Array of regular expression of affixes. Each regular expression is
+	 * compiled only on demand.
+	 */
+	AffixReg   *reg;
+	/*
+	 * Memory context for compiling regular expressions.
+	 */
+	MemoryContext dictCtx;
+} IspellDict;
+
+extern TSLexeme *NINormalizeWord(IspellDict *Conf, char *word);
 
 extern void NIStartBuild(IspellDictBuild *ConfBuild);
 extern void NIImportAffixes(IspellDictBuild *ConfBuild, const char *filename);
