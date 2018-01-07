@@ -76,6 +76,7 @@
 #include "storage/predicate.h"
 #include "tcop/tcopprot.h"
 #include "tsearch/ts_cache.h"
+#include "tsearch/ts_shared.h"
 #include "utils/builtins.h"
 #include "utils/bytea.h"
 #include "utils/guc_tables.h"
@@ -2907,6 +2908,19 @@ static struct config_int ConfigureNamesInt[] =
 		},
 		&gin_pending_list_limit,
 		4096, 64, MAX_KILOBYTES,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"shared_dictionaries", PGC_POSTMASTER, RESOURCES_MEM,
+			gettext_noop("Sets the maximum number of text search dictionaries loaded into shared memory."),
+			gettext_noop("Currently controls only loading of Ispell dictionaries. "
+						 "If the number of simultaneously loaded dictionaries "
+						 "reaches the maximum allowed number then a new dictionary "
+						 "will be loaded into local memory of a backend.")
+		},
+		&shared_dictionaries,
+		10, 0, INT_MAX,
 		NULL, NULL, NULL
 	},
 

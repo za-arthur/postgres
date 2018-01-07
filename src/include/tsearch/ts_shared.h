@@ -16,6 +16,11 @@
 #include "c.h"
 #include "storage/dsm.h"
 
+/*
+ * GUC variable for maximum number of shared dictionaries
+ */
+extern int shared_dictionaries;
+
 typedef void *(*ispell_build_callback) (void *dictbuild,
 										const char *dictfile,
 										const char *afffile,

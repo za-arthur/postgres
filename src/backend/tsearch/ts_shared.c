@@ -17,8 +17,10 @@
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
 
-/* XXX should it be a GUC-variable? */
-#define NUM_DICTIONARIES	20
+
+/*
+ * Hash table structures
+ */
 
 typedef struct
 {
@@ -32,13 +34,22 @@ typedef struct
 	dsm_handle	dict_dsm;
 } TsearchDictEntry;
 
+static HTAB *dict_table;
+
+/*
+ * Shared struct for locking
+ */
 typedef struct
 {
 	LWLock		lock;
 } TsearchCtlData;
 
 static TsearchCtlData *tsearch_ctl;
-static HTAB *dict_table;
+
+/*
+ * GUC variable for maximum number of shared dictionaries
+ */
+int			shared_dictionaries = 10;
 
 /*
  * Return handle to a dynamic shared memory using hash table. If shared memory
@@ -144,7 +155,7 @@ TsearchShmemInit(void)
 	ctl.entrysize = sizeof(TsearchDictEntry);
 
 	dict_table = ShmemInitHash("Shared Tsearch Lookup Table",
-							   NUM_DICTIONARIES, NUM_DICTIONARIES,
+							   shared_dictionaries, shared_dictionaries,
 							   &ctl,
 							   HASH_ELEM | HASH_BLOBS);
 }
@@ -161,7 +172,7 @@ TsearchShmemSize(void)
 	size = add_size(size, MAXALIGN(sizeof(TsearchCtlData)));
 
 	/* size of lookup hash table */
-	size = add_size(size, hash_estimate_size(NUM_DICTIONARIES,
+	size = add_size(size, hash_estimate_size(shared_dictionaries,
 											 sizeof(TsearchDictEntry)));
 
 	return size;
