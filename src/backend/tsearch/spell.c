@@ -2326,6 +2326,10 @@ CompileAffixReg(AffixReg *reg, bool isregis, int type,
 
 	Assert(dictCtx);
 
+	/*
+	 * Switch to memory context of the dictionary, so compiled expression can be
+	 * used in other queries.
+	 */
 	oldcontext = MemoryContextSwitchTo(dictCtx);
 
 	if (isregis)

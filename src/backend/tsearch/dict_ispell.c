@@ -98,7 +98,7 @@ dispell_init(PG_FUNCTION_ARGS)
 		dsm_segment *seg;
 		uint32		naffix;
 
-		d->dict_handle = ispell_shmem_location(&d->build, dictfile, afffile,
+		d->dict_handle = ispell_shmem_location(&(d->build), dictfile, afffile,
 											   dispell_build);
 
 		/*
@@ -109,7 +109,7 @@ dispell_init(PG_FUNCTION_ARGS)
 		{
 			Size		ispell_size;
 
-			d->obj.dict = (IspellDictData *) dispell_build(&d->build,
+			d->obj.dict = (IspellDictData *) dispell_build(&(d->build),
 														   dictfile, afffile,
 														   &ispell_size);
 			naffix = d->obj.dict->nAffix;
@@ -175,7 +175,7 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	}
 
 	txt = lowerstr_with_len(in, len);
-	res = NINormalizeWord(&d->obj, txt);
+	res = NINormalizeWord(&(d->obj), txt);
 
 	if (res == NULL)
 	{
