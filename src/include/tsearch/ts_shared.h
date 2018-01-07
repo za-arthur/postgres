@@ -14,15 +14,16 @@
 #define TS_SHARED_H
 
 #include "c.h"
+#include "storage/dsm.h"
 
 typedef void *(*ispell_build_callback) (void *dictbuild,
 										const char *dictfile,
 										const char *afffile,
 										Size *size);
 
-extern void *ispell_shmem_location(void *dictbuild,
-								   const char *dictfile, const char *afffile,
-								   ispell_build_callback allocate_cb);
+extern dsm_handle ispell_shmem_location(void *dictbuild,
+									  const char *dictfile, const char *afffile,
+									  ispell_build_callback allocate_cb);
 
 extern void TsearchShmemInit(void);
 extern Size TsearchShmemSize(void);

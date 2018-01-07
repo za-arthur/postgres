@@ -13,7 +13,6 @@
  */
 #include "postgres.h"
 
-#include "storage/dsm.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
@@ -42,14 +41,15 @@ static TsearchCtlData *tsearch_ctl;
 static HTAB *dict_table;
 
 /*
- * Return handle to a dynamic shared memory.
+ * Return handle to a dynamic shared memory using hash table. If shared memory
+ * for dictfile and afffile doesn't allocated yet, do it.
  *
  * dictbuild: building structure for the dictionary.
  * dictfile: .dict file of the dictionary.
  * afffile: .aff file of the dictionary.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  */
-void *
+dsm_handle
 ispell_shmem_location(void *dictbuild,
 					  const char *dictfile, const char *afffile,
 					  ispell_build_callback allocate_cb)
@@ -58,7 +58,7 @@ ispell_shmem_location(void *dictbuild,
 	TsearchDictEntry *entry;
 	bool		found;
 	dsm_segment *seg;
-	void	   *res;
+	dsm_handle	res;
 
 	StrNCpy(key.dictfile, dictfile, MAXPGPATH);
 	StrNCpy(key.afffile, afffile, MAXPGPATH);
@@ -72,7 +72,8 @@ refind_entry:
 	/* Dictionary wasn't load into memory */
 	if (!found)
 	{
-		void	   *ispell_dict;
+		void	   *ispell_dict,
+				   *dict_location;
 		Size		ispell_size;
 
 		/* Try to get exclusive lock */
@@ -85,21 +86,28 @@ refind_entry:
 			goto refind_entry;
 		}
 
-		entry = (TsearchDictEntry *) hash_search(dict_table, &key, HASH_ENTER,
+		entry = (TsearchDictEntry *) hash_search(dict_table, &key,
+												 HASH_ENTER_NULL,
 												 &found);
 
-		Assert(!found);
+		/*
+		 * There is no space in shared hash table, let backend to build the
+		 * dictionary within its memory context.
+		 */
+		if (entry == NULL)
+			return DSM_HANDLE_INVALID;
 
 		/* The lock was free so add new entry */
 		ispell_dict = allocate_cb(dictbuild, dictfile, afffile, &ispell_size);
 
 		seg = dsm_create(ispell_size, 0);
-		res = dsm_segment_address(seg);
-		memcpy(res, ispell_dict, ispell_size);
+		dict_location = dsm_segment_address(seg);
+		memcpy(dict_location, ispell_dict, ispell_size);
 
 		pfree(ispell_dict);
 
 		entry->dict_dsm = dsm_segment_handle(seg);
+		res = entry->dict_dsm;
 
 		/* Remain attached until end of postmaster */
 		dsm_pin_segment(seg);
@@ -108,10 +116,7 @@ refind_entry:
 	}
 	else
 	{
-		seg = dsm_attach(entry->dict_dsm);
-		res = dsm_segment_address(seg);
-
-		dsm_detach(seg);
+		res = entry->dict_dsm;
 	}
 
 	LWLockRelease(&tsearch_ctl->lock);
@@ -129,7 +134,7 @@ TsearchShmemInit(void)
 	bool		found;
 
 	tsearch_ctl = (TsearchCtlData *)
-		ShmemInitStruct("Full Text Search Ctl", TsearchShmemSize(), &found);
+		ShmemInitStruct("Full Text Search Ctl", sizeof(TsearchCtlData), &found);
 
 	if (!found)
 		LWLockInitialize(&tsearch_ctl->lock, LWTRANCHE_TSEARCH_DSA);
