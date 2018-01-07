@@ -3,6 +3,8 @@
  * dict_ispell.c
  *		Ispell dictionary interface
  *
+ * Portions Copyright (c) 1996-2018, PostgreSQL Global Development Group
+ *
  * By default all Ispell dictionaries are stored in DSM. But if number of
  * loaded dictionaries reached maximum allowed value then it will be
  * allocated within its memory context (dictCtx).
@@ -11,8 +13,6 @@
  * structures for regular expressions are compiled on first demand and
  * stored using AffixReg array. It is because regex_t and Regis cannot be
  * stored in shared memory.
- *
- * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
