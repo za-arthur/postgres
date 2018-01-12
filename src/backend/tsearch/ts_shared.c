@@ -52,13 +52,16 @@ static TsearchCtlData *tsearch_ctl;
 int			shared_dictionaries = 10;
 
 /*
- * Return handle to a dynamic shared memory using hash table. If shared memory
- * for dictfile and afffile doesn't allocated yet, do it.
+ * Get location in shared memory using hash table. If shared memory for
+ * dictfile and afffile doesn't allocated yet, do it.
  *
  * dictbuild: building structure for the dictionary.
  * dictfile: .dict file of the dictionary.
  * afffile: .aff file of the dictionary.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
+ *
+ * Returns address in the dynamic shared memory segment or NULL if there is no
+ * space in shared hash table.
  */
 void *
 ispell_shmem_location(void *dictbuild,
