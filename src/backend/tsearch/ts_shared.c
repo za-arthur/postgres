@@ -106,7 +106,7 @@ refind_entry:
 		 * dictionary within its memory context.
 		 */
 		if (entry == NULL)
-			return DSM_HANDLE_INVALID;
+			return NULL;
 
 		/* The lock was free so add new entry */
 		ispell_dict = allocate_cb(dictbuild, dictfile, afffile, &ispell_size);
