@@ -60,7 +60,7 @@ int			shared_dictionaries = 10;
  * afffile: .aff file of the dictionary.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  */
-dsm_handle
+void *
 ispell_shmem_location(void *dictbuild,
 					  const char *dictfile, const char *afffile,
 					  ispell_build_callback allocate_cb)
@@ -69,7 +69,7 @@ ispell_shmem_location(void *dictbuild,
 	TsearchDictEntry *entry;
 	bool		found;
 	dsm_segment *seg;
-	dsm_handle	res;
+	void	   *res;
 
 	StrNCpy(key.dictfile, dictfile, MAXPGPATH);
 	StrNCpy(key.afffile, afffile, MAXPGPATH);
@@ -118,19 +118,19 @@ refind_entry:
 		pfree(ispell_dict);
 
 		entry->dict_dsm = dsm_segment_handle(seg);
-		res = entry->dict_dsm;
 
 		/* Remain attached until end of postmaster */
 		dsm_pin_segment(seg);
-
-		dsm_detach(seg);
 	}
 	else
-	{
-		res = entry->dict_dsm;
-	}
+		seg = dsm_attach(entry->dict_dsm);
 
 	LWLockRelease(&tsearch_ctl->lock);
+
+	/* Remain attached until end of session */
+	dsm_pin_mapping(seg);
+
+	res = dsm_segment_address(seg);
 
 	return res;
 }
