@@ -77,10 +77,10 @@
  * with the dictionary cache entry.  We keep the short-lived stuff
  * in the ConfBuild->buildCxt context.
  */
-#define tmpalloc(sz)	MemoryContextAlloc(Conf->buildCxt, (sz))
-#define tmpalloc0(sz)	MemoryContextAllocZero(Conf->buildCxt, (sz))
+#define tmpalloc(sz)	MemoryContextAlloc(ConfBuild->buildCxt, (sz))
+#define tmpalloc0(sz)	MemoryContextAllocZero(ConfBuild->buildCxt, (sz))
 
-#define tmpstrdup(str)	MemoryContextStrdup(Conf->buildCxt, (str))
+#define tmpstrdup(str)	MemoryContextStrdup(ConfBuild->buildCxt, (str))
 
 /*
  * Prepare for constructing an ISpell dictionary.
@@ -703,11 +703,12 @@ NIAddSpell(IspellDictBuild *ConfBuild, const char *word, const char *flag)
 			ConfBuild->Spell = (SPELL **) tmpalloc(ConfBuild->mSpell * sizeof(SPELL *));
 		}
 	}
-	Conf->Spell[Conf->nspell] = (SPELL *) tmpalloc(SPELLHDRSZ + strlen(word) + 1);
-	strcpy(Conf->Spell[Conf->nspell]->word, word);
-	Conf->Spell[Conf->nspell]->p.flag = (*flag != '\0')
+	ConfBuild->Spell[ConfBuild->nSpell] =
+		(SPELL *) tmpalloc(SPELLHDRSZ + strlen(word) + 1);
+	strcpy(ConfBuild->Spell[ConfBuild->nSpell]->word, word);
+	ConfBuild->Spell[ConfBuild->nSpell]->p.flag = (*flag != '\0')
 		? tmpstrdup(flag) : VoidString;
-	Conf->nspell++;
+	ConfBuild->nSpell++;
 }
 
 /*
