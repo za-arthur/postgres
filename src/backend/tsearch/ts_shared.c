@@ -18,6 +18,7 @@
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
 #include "utils/hashutils.h"
+#include "utils/memutils.h"
 
 
 /*
@@ -110,10 +111,14 @@ ispell_shmem_location(void *dictbuild,
 
 	if (entry)
 	{
-		seg = dsm_attach(entry->dict_dsm);
-
-		/* Remain attached until end of session */
-		dsm_pin_mapping(seg);
+		/* Try to find an existing mapping first */
+		seg = dsm_find_mapping(entry->dict_dsm);
+		if (!seg)
+		{
+			seg = dsm_attach(entry->dict_dsm);
+			/* Remain attached until end of session */
+			dsm_pin_mapping(seg);
+		}
 
 		dshash_release_lock(dict_table, entry);
 
@@ -211,10 +216,16 @@ TsearchShmemSize(void)
 static void
 init_dict_table(void)
 {
+	MemoryContext old_context;
 	dsa_area   *dsa;
 
 	if (max_shared_dictionaries_size == 0)
 		return;
+
+	if (dict_table)
+		return;
+
+	old_context = MemoryContextSwitchTo(TopMemoryContext);
 
 recheck_table:
 	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
@@ -249,12 +260,17 @@ recheck_table:
 
 		dict_table = dshash_create(dsa, &dict_table_params, NULL);
 		tsearch_ctl->dict_table_handle = dshash_get_hash_table_handle(dict_table);
+
+		/* Remain attached until end of postmaster */
+		dsa_pin(dsa);
 	}
 
 	LWLockRelease(&tsearch_ctl->lock);
 
-	/* Remain attached until end of postmaster */
-	dsa_pin(dsa);
+	/* Remain attached until end of session */
+	dsa_pin_mapping(dsa);
+
+	MemoryContextSwitchTo(old_context);
 }
 
 /*
