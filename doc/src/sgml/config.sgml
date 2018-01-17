@@ -1355,16 +1355,16 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
-     <varlistentry id="guc-shared-dictionaries" xreflabel="shared_dictionaries">
-      <term><varname>shared_dictionaries</varname> (<type>integer</type>)
+     <varlistentry id="guc-max-shared-dictionaries-size" xreflabel="max_shared_dictionaries_size">
+      <term><varname>max_shared_dictionaries_size</varname> (<type>integer</type>)
       <indexterm>
-       <primary><varname>shared_dictionaries</varname> configuration parameter</primary>
+       <primary><varname>max_shared_dictionaries_size</varname> configuration parameter</primary>
       </indexterm>
       </term>
       <listitem>
        <para>
-        Sets the maximum number of text search dictionaries loaded into shared
-        memory.  The default is 10 dictionaries.
+        Sets the maximum size of all text search dictionaries loaded into shared
+        memory.  The default is 150 megabytes (<literal>150MB</literal>).
        </para>
 
        <para>
@@ -1378,8 +1378,8 @@ include_dir 'conf.d'
        </para>
 
        <para>
-        If the number of simultaneously loaded dictionaries reaches the maximum
-        allowed number then a new dictionary will be loaded into local memory of
+        If the size of simultaneously loaded dictionaries reaches the maximum
+        allowed size then a new dictionary will be loaded into local memory of
         a backend.
        </para>
       </listitem>
