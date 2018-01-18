@@ -19,14 +19,10 @@
  */
 extern int max_shared_dictionaries_size;
 
-typedef void *(*ispell_build_callback) (void *dictbuild,
-										const char *dictfile,
-										const char *afffile,
-										Size *size);
+typedef void *(*ispell_build_callback) (void *arg, Size *size);
 
-extern void *ispell_shmem_location(void *dictbuild, Oid dictid,
-								   const char *dictfile, const char *afffile,
-								   ispell_build_callback allocate_cb);
+extern void *ts_dict_shmem_location(Oid dictid, void *arg,
+									ispell_build_callback allocate_cb);
 
 extern void TsearchShmemInit(void);
 extern Size TsearchShmemSize(void);

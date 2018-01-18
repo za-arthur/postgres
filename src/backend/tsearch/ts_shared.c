@@ -68,21 +68,17 @@ static const dshash_parameters dict_table_params ={
 
 /*
  * Get location in shared memory using hash table. If shared memory for
- * dictfile and afffile doesn't allocated yet, do it.
+ * dictid doesn't allocated yet, do it.
  *
- * dictbuild: building structure for the dictionary.
  * dictid: Oid of the dictionary.
- * dictfile: .dict file of the dictionary.
- * afffile: .aff file of the dictionary.
+ * arg: an argument to the callback function.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  *
  * Returns address in the dynamic shared memory segment or NULL if there is no
  * space in shared hash table.
  */
 void *
-ispell_shmem_location(void *dictbuild, Oid dictid,
-					  const char *dictfile, const char *afffile,
-					  ispell_build_callback allocate_cb)
+ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 {
 	TsearchDictEntry *entry;
 	bool		found;
@@ -139,7 +135,7 @@ ispell_shmem_location(void *dictbuild, Oid dictid,
 	}
 
 	/* Build the dictionary */
-	ispell_dict = allocate_cb(dictbuild, dictfile, afffile, &entry->dict_size);
+	ispell_dict = allocate_cb(arg, &entry->dict_size);
 
 	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
 
