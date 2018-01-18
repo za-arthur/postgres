@@ -24,7 +24,7 @@ typedef void *(*ispell_build_callback) (void *dictbuild,
 										const char *afffile,
 										Size *size);
 
-extern void *ispell_shmem_location(void *dictbuild,
+extern void *ispell_shmem_location(void *dictbuild, Oid dictid,
 								   const char *dictfile, const char *afffile,
 								   ispell_build_callback allocate_cb);
 

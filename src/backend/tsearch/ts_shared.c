@@ -24,17 +24,11 @@
 /*
  * Hash table structures
  */
-
 typedef struct
 {
-	char		dictfile[MAXPGPATH];
-	char		afffile[MAXPGPATH];
-} TsearchDictKey;
-
-typedef struct
-{
-	TsearchDictKey key;
+	Oid			dict_id;
 	dsm_handle	dict_dsm;
+	Size		dict_size;
 } TsearchDictEntry;
 
 static dshash_table *dict_table = NULL;
@@ -47,28 +41,28 @@ typedef struct
 	dsa_handle	area;
 	dshash_table_handle dict_table_handle;
 
+	/* Total size of loaded dictionaries into shared memory in bytes */
+	Size		loaded_size;
+
 	LWLock		lock;
 } TsearchCtlData;
 
 static TsearchCtlData *tsearch_ctl;
 
 /*
- * GUC variable for maximum number of shared dictionaries
+ * GUC variable for maximum number of shared dictionaries. Default value is
+ * 100MB.
  */
-int			max_shared_dictionaries_size = 10;
+int			max_shared_dictionaries_size = 100 * 1024;
 
 static void init_dict_table(void);
 
-static int dict_table_compare(const void *a, const void *b, size_t size,
-							  void *arg);
-static uint32 dict_table_hash(const void *a, size_t size, void *arg);
-
 /* Parameters for dict_table */
 static const dshash_parameters dict_table_params ={
-	sizeof(TsearchDictKey),
+	sizeof(Oid),
 	sizeof(TsearchDictEntry),
-	dict_table_compare,
-	dict_table_hash,
+	dshash_memcmp,
+	dshash_memhash,
 	LWTRANCHE_TSEARCH_TABLE
 };
 
@@ -77,6 +71,7 @@ static const dshash_parameters dict_table_params ={
  * dictfile and afffile doesn't allocated yet, do it.
  *
  * dictbuild: building structure for the dictionary.
+ * dictid: Oid of the dictionary.
  * dictfile: .dict file of the dictionary.
  * afffile: .aff file of the dictionary.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
@@ -85,29 +80,27 @@ static const dshash_parameters dict_table_params ={
  * space in shared hash table.
  */
 void *
-ispell_shmem_location(void *dictbuild,
+ispell_shmem_location(void *dictbuild, Oid dictid,
 					  const char *dictfile, const char *afffile,
 					  ispell_build_callback allocate_cb)
 {
-	TsearchDictKey key;
 	TsearchDictEntry *entry;
 	bool		found;
 	dsm_segment *seg;
 	void	   *ispell_dict,
 			   *dict_location;
-	Size		ispell_size;
 
 	init_dict_table();
 
-	/* If hash table wasn't created then do nothing */
+	/*
+	 * If hash table wasn't created then do nothing. It may happen when
+	 * max_shared_dictionaries_size is 0.
+	 */
 	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle))
 		return NULL;
 
-	StrNCpy(key.dictfile, dictfile, MAXPGPATH);
-	StrNCpy(key.afffile, afffile, MAXPGPATH);
-
 	/* Try to find an entry in the hash table */
-	entry = (TsearchDictEntry *) dshash_find(dict_table, &key, false);
+	entry = (TsearchDictEntry *) dshash_find(dict_table, &dictid, false);
 
 	if (entry)
 	{
@@ -126,7 +119,7 @@ ispell_shmem_location(void *dictbuild,
 	}
 
 	/* Dictionary haven't been loaded into memory yet */
-	entry = (TsearchDictEntry *) dshash_find_or_insert(dict_table, &key,
+	entry = (TsearchDictEntry *) dshash_find_or_insert(dict_table, &dictid,
 													   &found);
 
 	if (found)
@@ -146,14 +139,44 @@ ispell_shmem_location(void *dictbuild,
 	}
 
 	/* Build the dictionary */
-	ispell_dict = allocate_cb(dictbuild, dictfile, afffile, &ispell_size);
+	ispell_dict = allocate_cb(dictbuild, dictfile, afffile, &entry->dict_size);
 
-	seg = dsm_create(ispell_size, 0);
+	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
+
+	/* Before allocating a DSM segment check check remaining shared space */
+	Assert(max_shared_dictionaries_size);
+
+	if (entry->dict_size + tsearch_ctl->loaded_size >
+		max_shared_dictionaries_size * 1024L)
+	{
+		LWLockRelease(&tsearch_ctl->lock);
+
+		elog(LOG, "there is no space in shared memory for text search dictionary %u, "
+			 "it will be loaded into backend's memory", dictid);
+
+		dshash_delete_entry(dict_table, entry);
+
+		return ispell_dict;
+	}
+
+	/* If we come here, we need an exclusive lock */
+	while (!LWLockAcquireOrWait(&tsearch_ctl->lock, LW_EXCLUSIVE))
+	{
+		/* We need just an exclusive lock */
+	}
+
+	tsearch_ctl->loaded_size += entry->dict_size;
+
+	LWLockRelease(&tsearch_ctl->lock);
+
+	/* At least, allocate a DSM segment for the compiled dictionary */
+	seg = dsm_create(entry->dict_size, 0);
 	dict_location = dsm_segment_address(seg);
-	memcpy(dict_location, ispell_dict, ispell_size);
+	memcpy(dict_location, ispell_dict, entry->dict_size);
 
 	pfree(ispell_dict);
 
+	entry->dict_id = dictid;
 	entry->dict_dsm = dsm_segment_handle(seg);
 
 	/* Remain attached until end of postmaster */
@@ -185,6 +208,7 @@ TsearchShmemInit(void)
 		LWLockInitialize(&tsearch_ctl->lock, LWTRANCHE_TSEARCH_DSA);
 
 		tsearch_ctl->dict_table_handle = InvalidDsaPointer;
+		tsearch_ctl->loaded_size = 0;
 	}
 }
 
@@ -271,32 +295,4 @@ recheck_table:
 	dsa_pin_mapping(dsa);
 
 	MemoryContextSwitchTo(old_context);
-}
-
-/*
- * A comparator function for TsearchDictKey.
- */
-static int
-dict_table_compare(const void *a, const void *b, size_t size, void *arg)
-{
-	TsearchDictKey *k1 = (TsearchDictKey *) a;
-	TsearchDictKey *k2 = (TsearchDictKey *) b;
-
-	return strncmp(k1->afffile, k2->afffile, MAXPGPATH) ||
-		strncmp(k1->dictfile, k2->dictfile, MAXPGPATH) ? 1 : 0;
-}
-
-/*
- * A hash function for TsearchDictKey.
- */
-static uint32
-dict_table_hash(const void *a, size_t size, void *arg)
-{
-	uint32		s;
-	TsearchDictKey *k = (TsearchDictKey *) a;
-
-	s = hash_combine(0, string_hash(k->afffile, MAXPGPATH));
-	s = hash_combine(s, string_hash(k->dictfile, MAXPGPATH));
-
-	return s;
 }

@@ -2915,13 +2915,13 @@ static struct config_int ConfigureNamesInt[] =
 		{"max_shared_dictionaries_size", PGC_POSTMASTER, RESOURCES_MEM,
 			gettext_noop("Sets the maximum size of all text search dictionaries loaded into shared memory."),
 			gettext_noop("Currently controls only loading of Ispell dictionaries. "
-						 "If the size of simultaneously loaded dictionaries "
+						 "If total size of simultaneously loaded dictionaries "
 						 "reaches the maximum allowed size then a new dictionary "
 						 "will be loaded into local memory of a backend."),
 			GUC_UNIT_KB,
 		},
 		&max_shared_dictionaries_size,
-		150 * 1024, 0, MAX_KILOBYTES,
+		100 * 1024, 0, MAX_KILOBYTES,
 		NULL, NULL, NULL
 	},
 
