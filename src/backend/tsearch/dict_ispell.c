@@ -39,14 +39,20 @@ typedef struct
 	dsm_handle	dict_handle;
 } DictISpell;
 
-static void *dispell_build(void *dictbuild,
-						   const char *dictfile, const char *afffile,
-						   Size *size);
+typedef struct
+{
+	IspellDictBuild *build;
+	char	   *dictfile;
+	char	   *afffile;
+} IspellBuildArg;
+
+static void *dispell_build(void *arg, Size *size);
 
 Datum
 dispell_init(PG_FUNCTION_ARGS)
 {
 	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
+	Oid			dictid = PG_GETARG_OID(1);
 	DictISpell *d;
 	char	   *dictfile = NULL,
 			   *afffile = NULL;
@@ -95,27 +101,17 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	if (dictfile && afffile)
 	{
+		IspellBuildArg arg;
 		void	   *dict_location;
 
-		dict_location = ispell_shmem_location(&(d->build), dictfile, afffile,
-											  dispell_build);
+		arg.build = &d->build;
+		arg.dictfile = dictfile;
+		arg.afffile = afffile;
 
-		/*
-		 * There is no space in shared memory, build the dictionary within its
-		 * memory context.
-		 */
-		if (dict_location == NULL)
-		{
-			Size		ispell_size;
+		dict_location = ts_dict_shmem_location(dictid, &arg, dispell_build);
+		Assert(dict_location);
 
-			d->obj.dict = (IspellDictData *) dispell_build(&(d->build),
-														   dictfile, afffile,
-														   &ispell_size);
-		}
-		/* The dictionary was allocated in DSM */
-		else
-			d->obj.dict = (IspellDictData *) dict_location;
-
+		d->obj.dict = (IspellDictData *) dict_location;
 		d->obj.reg = (AffixReg *) palloc0(d->obj.dict->nAffix *
 										  sizeof(AffixReg));
 		/* Current memory context is dictionary's private memory context */
@@ -183,18 +179,18 @@ dispell_lexize(PG_FUNCTION_ARGS)
  * Result is palloc'ed.
  */
 static void *
-dispell_build(void *dictbuild, const char *dictfile, const char *afffile,
-			  Size *size)
+dispell_build(void *arg, Size *size)
 {
-	IspellDictBuild *build = (IspellDictBuild *) dictbuild;
+	IspellBuildArg *build_arg = (IspellBuildArg *) arg;
+	IspellDictBuild *build = build_arg->build;
 
-	Assert(dictfile && afffile);
+	Assert(build_arg->dictfile && build_arg->afffile);
 
 	NIStartBuild(build);
 
 	/* Read files */
-	NIImportDictionary(build, dictfile);
-	NIImportAffixes(build, afffile);
+	NIImportDictionary(build, build_arg->dictfile);
+	NIImportAffixes(build, build_arg->afffile);
 
 	/* Build persistent data to use by backends */
 	NISortDictionary(build);
