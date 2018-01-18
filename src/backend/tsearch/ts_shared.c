@@ -110,9 +110,13 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 
 	if (entry)
 	{
-		seg = dsm_attach(entry->dict_dsm);
-		/* Remain attached until end of session */
-		dsm_pin_mapping(seg);
+		seg = dsm_find_mapping(entry->dict_dsm);
+		if (!seg)
+		{
+			seg = dsm_attach(entry->dict_dsm);
+			/* Remain attached until end of session */
+			dsm_pin_mapping(seg);
+		}
 
 		dshash_release_lock(dict_table, entry);
 
@@ -160,6 +164,7 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 		return dict;
 	}
 
+	LWLockRelease(&tsearch_ctl->lock);
 	/* If we come here, we need an exclusive lock */
 	while (!LWLockAcquireOrWait(&tsearch_ctl->lock, LW_EXCLUSIVE))
 	{
