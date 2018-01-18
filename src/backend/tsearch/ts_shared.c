@@ -28,7 +28,6 @@ typedef struct
 {
 	Oid			dict_id;
 	dsm_handle	dict_dsm;
-	Size		dict_size;
 } TsearchDictEntry;
 
 static dshash_table *dict_table = NULL;
@@ -67,15 +66,19 @@ static const dshash_parameters dict_table_params ={
 };
 
 /*
- * Get location in shared memory using hash table. If shared memory for
- * dictid doesn't allocated yet, do it.
+ * Build the dictionary using allocate_cb callback. If there is a space in
+ * shared memory and max_shared_dictionaries_size is greater than 0 copy the
+ * dictionary into DSM.
+ *
+ * If max_shared_dictionaries_size is greater than 0 then try to find the
+ * dictionary in shared hash table first. If it was built by someone earlier
+ * just return its location in DSM.
  *
  * dictid: Oid of the dictionary.
  * arg: an argument to the callback function.
  * allocate_cb: function to build the dictionary, if it wasn't found in DSM.
  *
- * Returns address in the dynamic shared memory segment or NULL if there is no
- * space in shared hash table.
+ * Returns address in the dynamic shared memory segment or in backend memory.
  */
 void *
 ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
@@ -83,17 +86,22 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 	TsearchDictEntry *entry;
 	bool		found;
 	dsm_segment *seg;
-	void	   *ispell_dict,
+	void	   *dict,
 			   *dict_location;
+	Size		dict_size;
 
 	init_dict_table();
 
 	/*
-	 * If hash table wasn't created then do nothing. It may happen when
-	 * max_shared_dictionaries_size is 0.
+	 * If hash table wasn't created build the dictionary in backend's memroy.
+	 * It may happen when max_shared_dictionaries_size is 0.
 	 */
 	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle))
-		return NULL;
+	{
+		dict = allocate_cb(arg, &dict_size);
+
+		return dict;
+	}
 
 	/* Try to find an entry in the hash table */
 	entry = (TsearchDictEntry *) dshash_find(dict_table, &dictid, false);
@@ -135,14 +143,14 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 	}
 
 	/* Build the dictionary */
-	ispell_dict = allocate_cb(arg, &entry->dict_size);
+	dict = allocate_cb(arg, &dict_size);
 
 	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
 
 	/* Before allocating a DSM segment check check remaining shared space */
 	Assert(max_shared_dictionaries_size);
 
-	if (entry->dict_size + tsearch_ctl->loaded_size >
+	if (dict_size + tsearch_ctl->loaded_size >
 		max_shared_dictionaries_size * 1024L)
 	{
 		LWLockRelease(&tsearch_ctl->lock);
@@ -152,7 +160,7 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 
 		dshash_delete_entry(dict_table, entry);
 
-		return ispell_dict;
+		return dict;
 	}
 
 	/* If we come here, we need an exclusive lock */
@@ -161,16 +169,16 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 		/* We need just an exclusive lock */
 	}
 
-	tsearch_ctl->loaded_size += entry->dict_size;
+	tsearch_ctl->loaded_size += dict_size;
 
 	LWLockRelease(&tsearch_ctl->lock);
 
 	/* At least, allocate a DSM segment for the compiled dictionary */
-	seg = dsm_create(entry->dict_size, 0);
+	seg = dsm_create(dict_size, 0);
 	dict_location = dsm_segment_address(seg);
-	memcpy(dict_location, ispell_dict, entry->dict_size);
+	memcpy(dict_location, dict, dict_size);
 
-	pfree(ispell_dict);
+	pfree(dict);
 
 	entry->dict_id = dictid;
 	entry->dict_dsm = dsm_segment_handle(seg);
