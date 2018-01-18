@@ -93,10 +93,12 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 	init_dict_table();
 
 	/*
-	 * If hash table wasn't created build the dictionary in backend's memroy.
-	 * It may happen when max_shared_dictionaries_size is 0.
+	 * Build the dictionary in backend's memory if a hash table wasn't created
+	 * or dictid is invalid (it may happen if the dicionary's init method was
+	 * called within verify_dictoptions()).
 	 */
-	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle))
+	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle) ||
+		!OidIsValid(dictid))
 	{
 		dict = allocate_cb(arg, &dict_size);
 
@@ -108,14 +110,9 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 
 	if (entry)
 	{
-		/* Try to find an existing mapping first */
-		seg = dsm_find_mapping(entry->dict_dsm);
-		if (!seg)
-		{
-			seg = dsm_attach(entry->dict_dsm);
-			/* Remain attached until end of session */
-			dsm_pin_mapping(seg);
-		}
+		seg = dsm_attach(entry->dict_dsm);
+		/* Remain attached until end of session */
+		dsm_pin_mapping(seg);
 
 		dshash_release_lock(dict_table, entry);
 

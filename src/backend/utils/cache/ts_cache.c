@@ -334,8 +334,9 @@ lookup_ts_dictionary_cache(Oid dictId)
 				dictoptions = deserialize_deflist(opt);
 
 			entry->dictData =
-				DatumGetPointer(OidFunctionCall1(template->tmplinit,
-												 PointerGetDatum(dictoptions)));
+				DatumGetPointer(OidFunctionCall2(template->tmplinit,
+												 PointerGetDatum(dictoptions),
+												 ObjectIdGetDatum(dictId)));
 
 			MemoryContextSwitchTo(oldcontext);
 		}
