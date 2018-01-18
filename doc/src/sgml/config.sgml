@@ -1364,7 +1364,8 @@ include_dir 'conf.d'
       <listitem>
        <para>
         Sets the maximum size of all text search dictionaries loaded into shared
-        memory.  The default is 100 megabytes (<literal>100MB</literal>).
+        memory.  The default is 100 megabytes (<literal>100MB</literal>).  This
+        parameter can only be set at server start.
        </para>
 
        <para>
