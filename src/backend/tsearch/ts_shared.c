@@ -90,6 +90,17 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 			   *dict_location;
 	Size		dict_size;
 
+#define CHECK_SHARED_SPACE() \
+	if (dict_size + tsearch_ctl->loaded_size >		\
+		max_shared_dictionaries_size * 1024L)		\
+	{												\
+		LWLockRelease(&tsearch_ctl->lock);			\
+		elog(LOG, "there is no space in shared memory for text search dictionary %u, " \
+			 "it will be loaded into backend's memory", dictid); \
+		dshash_delete_entry(dict_table, entry);		\
+		return dict; \
+	} \
+
 	init_dict_table();
 
 	/*
@@ -148,27 +159,20 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 
 	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
 
-	/* Before allocating a DSM segment check check remaining shared space */
+	/* Before allocating a DSM segment check remaining shared space */
 	Assert(max_shared_dictionaries_size);
 
-	if (dict_size + tsearch_ctl->loaded_size >
-		max_shared_dictionaries_size * 1024L)
-	{
-		LWLockRelease(&tsearch_ctl->lock);
-
-		elog(LOG, "there is no space in shared memory for text search dictionary %u, "
-			 "it will be loaded into backend's memory", dictid);
-
-		dshash_delete_entry(dict_table, entry);
-
-		return dict;
-	}
+	CHECK_SHARED_SPACE();
 
 	LWLockRelease(&tsearch_ctl->lock);
 	/* If we come here, we need an exclusive lock */
 	while (!LWLockAcquireOrWait(&tsearch_ctl->lock, LW_EXCLUSIVE))
 	{
-		/* We need just an exclusive lock */
+		/*
+		 * Check again in case if there are no space anymore while we were
+		 * waiting for exclusive lock.
+		 */
+		CHECK_SHARED_SPACE();
 	}
 
 	tsearch_ctl->loaded_size += dict_size;
