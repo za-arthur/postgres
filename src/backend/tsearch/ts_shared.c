@@ -95,8 +95,10 @@ ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 		max_shared_dictionaries_size * 1024L)		\
 	{												\
 		LWLockRelease(&tsearch_ctl->lock);			\
-		elog(LOG, "there is no space in shared memory for text search dictionary %u, " \
-			 "it will be loaded into backend's memory", dictid); \
+		ereport(LOG, \
+				(errmsg("there is no space in shared memory for text search " \
+						"dictionary %u, it will be loaded into backend's memory", \
+						dictid))); \
 		dshash_delete_entry(dict_table, entry);		\
 		return dict; \
 	} \
