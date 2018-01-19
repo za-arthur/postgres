@@ -81,8 +81,7 @@ static const dshash_parameters dict_table_params ={
  * Returns address in the dynamic shared memory segment or in backend memory.
  */
 void *
-ts_dict_shmem_location(Oid dictid, List *dictoptions,
-					   ispell_build_callback allocate_cb)
+ts_dict_shmem_location(Oid dictid, void *arg, ispell_build_callback allocate_cb)
 {
 	TsearchDictEntry *entry;
 	bool		found;
@@ -114,7 +113,7 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle) ||
 		!OidIsValid(dictid))
 	{
-		dict = allocate_cb(dictoptions, &dict_size);
+		dict = allocate_cb(arg, &dict_size);
 
 		return dict;
 	}
@@ -158,7 +157,7 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 	}
 
 	/* Build the dictionary */
-	dict = allocate_cb(dictoptions, &dict_size);
+	dict = allocate_cb(arg, &dict_size);
 
 	LWLockAcquire(&tsearch_ctl->lock, LW_SHARED);
 

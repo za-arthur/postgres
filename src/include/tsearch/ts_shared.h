@@ -14,16 +14,14 @@
 
 #include "c.h"
 
-#include "nodes/pg_list.h"
-
 /*
  * GUC variable for maximum number of shared dictionaries
  */
 extern int max_shared_dictionaries_size;
 
-typedef void *(*ispell_build_callback) (List *dictoptions, Size *size);
+typedef void *(*ispell_build_callback) (void *arg, Size *size);
 
-extern void *ts_dict_shmem_location(Oid dictid, List *dictoptions,
+extern void *ts_dict_shmem_location(Oid dictid, void *arg,
 									ispell_build_callback allocate_cb);
 
 extern void TsearchShmemInit(void);
