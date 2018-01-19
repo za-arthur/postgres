@@ -33,18 +33,16 @@
 
 typedef struct
 {
-	StopList	stoplist;
-	IspellDictBuild build;
-	IspellDict	obj;
-	dsm_handle	dict_handle;
-} DictISpell;
-
-typedef struct
-{
-	IspellDictBuild *build;
 	char	   *dictfile;
 	char	   *afffile;
 } IspellBuildArg;
+
+typedef struct
+{
+	StopList	stoplist;
+	IspellDict	obj;
+	IspellBuildArg build_arg;
+} DictISpell;
 
 static void *dispell_build(void *arg, Size *size);
 
@@ -101,14 +99,12 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	if (dictfile && afffile)
 	{
-		IspellBuildArg arg;
 		void	   *dict_location;
 
-		arg.build = &d->build;
-		arg.dictfile = dictfile;
-		arg.afffile = afffile;
+		d->build_arg.dictfile = dictfile;
+		d->build_arg.afffile = afffile;
 
-		dict_location = ts_dict_shmem_location(dictid, &arg, dispell_build);
+		dict_location = ts_dict_shmem_location(dictid, &(d->build_arg), dispell_build);
 		Assert(dict_location);
 
 		d->obj.dict = (IspellDictData *) dict_location;
@@ -182,26 +178,27 @@ static void *
 dispell_build(void *arg, Size *size)
 {
 	IspellBuildArg *build_arg = (IspellBuildArg *) arg;
-	IspellDictBuild *build = build_arg->build;
+	IspellDictBuild build;
 
 	Assert(build_arg->dictfile && build_arg->afffile);
 
-	NIStartBuild(build);
+	MemSet(&build, 0, sizeof(build));
+	NIStartBuild(&build);
 
 	/* Read files */
-	NIImportDictionary(build, build_arg->dictfile);
-	NIImportAffixes(build, build_arg->afffile);
+	NIImportDictionary(&build, build_arg->dictfile);
+	NIImportAffixes(&build, build_arg->afffile);
 
 	/* Build persistent data to use by backends */
-	NISortDictionary(build);
-	NISortAffixes(build);
+	NISortDictionary(&build);
+	NISortAffixes(&build);
 
-	NICopyData(build);
+	NICopyData(&build);
 
 	/* Release temporary data */
-	NIFinishBuild(build);
+	NIFinishBuild(&build);
 
 	/* Return the buffer and its size */
-	*size = build->dict_size;
-	return build->dict;
+	*size = build.dict_size;
+	return build.dict;
 }
