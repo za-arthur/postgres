@@ -382,6 +382,7 @@ typedef enum NodeTag
 	T_CreateRangeStmt,
 	T_AlterEnumStmt,
 	T_AlterTSDictionaryStmt,
+	T_ReloadTSDictionaryStmt,
 	T_AlterTSConfigurationStmt,
 	T_CreateFdwStmt,
 	T_AlterFdwStmt,

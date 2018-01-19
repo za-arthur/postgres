@@ -278,7 +278,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 		ViewStmt CheckPointStmt CreateConversionStmt
 		DeallocateStmt PrepareStmt ExecuteStmt
 		DropOwnedStmt ReassignOwnedStmt
-		AlterTSConfigurationStmt AlterTSDictionaryStmt
+		AlterTSConfigurationStmt AlterTSDictionaryStmt ReloadTSDictionaryStmt
 		CreateMatViewStmt RefreshMatViewStmt CreateAmStmt
 		CreatePublicationStmt AlterPublicationStmt
 		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
@@ -665,7 +665,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	QUOTE
 
 	RANGE READ REAL REASSIGN RECHECK RECURSIVE REF REFERENCES REFERENCING
-	REFRESH REINDEX RELATIVE_P RELEASE RENAME REPEATABLE REPLACE REPLICA
+	REFRESH REINDEX RELATIVE_P RELEASE RELOAD RENAME REPEATABLE REPLACE REPLICA
 	RESET RESTART RESTRICT RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLUP
 	ROUTINE ROUTINES ROW ROWS RULE
 
@@ -679,7 +679,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 	TIME TIMESTAMP TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TYPE_P TYPES_P
 
-	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLISTEN UNLOGGED
+	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLISTEN UNLOAD UNLOGGED
 	UNTIL UPDATE USER USING
 
 	VACUUM VALID VALIDATE VALIDATOR VALUE_P VALUES VARCHAR VARIADIC VARYING
@@ -919,6 +919,7 @@ stmt :
 			| PrepareStmt
 			| ReassignOwnedStmt
 			| ReindexStmt
+			| ReloadTSDictionaryStmt
 			| RemoveAggrStmt
 			| RemoveFuncStmt
 			| RemoveOperStmt
@@ -10387,6 +10388,31 @@ any_with:	WITH									{}
 			| WITH_LA								{}
 		;
 
+/*****************************************************************************
+ *
+ *		QUERY :
+ *				RELOAD TEXT SEARCH DICTIONARY dict_name
+ *				UNLOAD TEXT SEARCH DICTIONARY dict_name
+ *
+ *****************************************************************************/
+
+ReloadTSDictionaryStmt:
+			RELOAD TEXT_P SEARCH DICTIONARY any_name
+				{
+					ReloadTSDictionaryStmt *n = makeNode(ReloadTSDictionaryStmt);
+					n->dictname = $5;
+					n->is_unload = false;
+					$$ = (Node *) n;
+				}
+			| UNLOAD TEXT_P SEARCH DICTIONARY any_name
+				{
+					ReloadTSDictionaryStmt *n = makeNode(ReloadTSDictionaryStmt);
+					n->dictname = $5;
+					n->is_unload = true;
+					$$ = (Node *) n;
+				}
+		;
+
 
 /*****************************************************************************
  *
@@ -15100,6 +15126,7 @@ unreserved_keyword:
 			| REINDEX
 			| RELATIVE_P
 			| RELEASE
+			| RELOAD
 			| RENAME
 			| REPEATABLE
 			| REPLACE
@@ -15167,6 +15194,7 @@ unreserved_keyword:
 			| UNENCRYPTED
 			| UNKNOWN
 			| UNLISTEN
+			| UNLOAD
 			| UNLOGGED
 			| UNTIL
 			| UPDATE

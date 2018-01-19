@@ -3381,6 +3381,17 @@ typedef struct AlterTSDictionaryStmt
 } AlterTSDictionaryStmt;
 
 /*
+ * TS Dictionary Reload and Unload Statement
+ */
+typedef struct ReloadTSDictionaryStmt
+{
+	NodeTag		type;
+	List	   *dictname;		/* qualified name (list of Value strings) */
+	bool		is_unload;		/* if true - unload a dictionary, otherwise
+								 * reload a dictionary */
+} ReloadTSDictionaryStmt;
+
+/*
  * TS Configuration stmts: DefineStmt, RenameStmt and DropStmt are default
  */
 typedef enum AlterTSConfigType

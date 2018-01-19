@@ -927,6 +927,14 @@ standard_ProcessUtility(PlannedStmt *pstmt,
 				break;
 			}
 
+		case T_ReloadTSDictionaryStmt:
+			{
+				ReloadTSDictionaryStmt *stmt = (ReloadTSDictionaryStmt *) parsetree;
+
+				ReloadTSDictionary(stmt);
+				break;
+			}
+
 		default:
 			/* All other statement types have event trigger support */
 			ProcessUtilitySlow(pstate, pstmt, queryString,

@@ -637,6 +637,17 @@ AlterTSDictionary(AlterTSDictionaryStmt *stmt)
 	return address;
 }
 
+/*
+ * RELOAD/UNLOAD TEXT SEARCH DICTIONARY
+ */
+void
+ReloadTSDictionary(ReloadTSDictionaryStmt *stmt)
+{
+	Oid			dictId;
+
+	dictId = get_ts_dict_oid(stmt->dictname, false);
+}
+
 /* ---------------------- TS Template commands -----------------------*/
 
 /*
