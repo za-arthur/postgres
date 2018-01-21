@@ -637,31 +637,6 @@ AlterTSDictionary(AlterTSDictionaryStmt *stmt)
 	return address;
 }
 
-/*
- * RELOAD/UNLOAD TEXT SEARCH DICTIONARY
- */
-void
-ReloadTSDictionary(ReloadTSDictionaryStmt *stmt)
-{
-	Relation	rel;
-	Oid			dictId;
-	TSDictionaryCacheEntry *dict;
-
-	dictId = get_ts_dict_oid(stmt->dictname, false);
-
-	rel = heap_open(TSDictionaryRelationId, RowExclusiveLock);
-
-	dict = lookup_ts_dictionary_cache_extended(dictId, false);
-
-	if (dict == NULL || !dict->isvalid)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("text search dictionary %u is not loaded into shared memory",
-						dictId)));
-
-	heap_close(rel, RowExclusiveLock);
-}
-
 /* ---------------------- TS Template commands -----------------------*/
 
 /*

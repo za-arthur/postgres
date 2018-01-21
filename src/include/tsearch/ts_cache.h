@@ -89,8 +89,6 @@ extern char *TSCurrentConfig;
 
 extern TSParserCacheEntry *lookup_ts_parser_cache(Oid prsId);
 extern TSDictionaryCacheEntry *lookup_ts_dictionary_cache(Oid dictId);
-extern TSDictionaryCacheEntry *lookup_ts_dictionary_cache_extended(Oid dictId,
-																   bool need_init);
 extern TSConfigCacheEntry *lookup_ts_config_cache(Oid cfgId);
 
 extern Oid	getTSCurrentConfig(bool emitError);

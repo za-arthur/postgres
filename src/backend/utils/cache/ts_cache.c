@@ -209,15 +209,6 @@ lookup_ts_parser_cache(Oid prsId)
 TSDictionaryCacheEntry *
 lookup_ts_dictionary_cache(Oid dictId)
 {
-	return lookup_ts_dictionary_cache_extended(dictId, true);
-}
-
-/*
- * Guts of lookup_ts_dictionary_cache().
- */
-TSDictionaryCacheEntry *
-lookup_ts_dictionary_cache_extended(Oid dictId, bool need_init)
-{
 	TSDictionaryCacheEntry *entry;
 
 	if (TSDictionaryCacheHash == NULL)
@@ -250,7 +241,7 @@ lookup_ts_dictionary_cache_extended(Oid dictId, bool need_init)
 	entry = (TSDictionaryCacheEntry *) hash_search(TSDictionaryCacheHash,
 												   (void *) &dictId,
 												   HASH_FIND, NULL);
-	if ((entry == NULL || !entry->isvalid) && need_init)
+	if (entry == NULL || !entry->isvalid)
 	{
 		/*
 		 * If we didn't find one, we want to make one. But first look up the
@@ -356,9 +347,9 @@ lookup_ts_dictionary_cache_extended(Oid dictId, bool need_init)
 		fmgr_info_cxt(entry->lexizeOid, &entry->lexize, entry->dictCtx);
 
 		entry->isvalid = true;
-
-		lastUsedDictionary = entry;
 	}
+
+	lastUsedDictionary = entry;
 
 	return entry;
 }

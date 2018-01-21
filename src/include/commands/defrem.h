@@ -112,7 +112,6 @@ extern void RemoveTSParserById(Oid prsId);
 extern ObjectAddress DefineTSDictionary(List *names, List *parameters);
 extern void RemoveTSDictionaryById(Oid dictId);
 extern ObjectAddress AlterTSDictionary(AlterTSDictionaryStmt *stmt);
-extern void ReloadTSDictionary(ReloadTSDictionaryStmt *stmt);
 
 extern ObjectAddress DefineTSTemplate(List *names, List *parameters);
 extern void RemoveTSTemplateById(Oid tmplId);
