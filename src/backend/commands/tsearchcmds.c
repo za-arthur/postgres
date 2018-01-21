@@ -661,7 +661,8 @@ get_ts_template_func(DefElem *defel, int attnum)
 	switch (attnum)
 	{
 		case Anum_pg_ts_template_tmplinit:
-			nargs = 1;
+			nargs = 2;
+			typeId[1] = OIDOID;
 			break;
 		case Anum_pg_ts_template_tmpllexize:
 			nargs = 4;
