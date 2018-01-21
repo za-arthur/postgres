@@ -309,3 +309,21 @@ recheck_table:
 
 	MemoryContextSwitchTo(old_context);
 }
+
+/*
+ * Release memory occupied by the dictionary. Uses TS template's unload method.
+ */
+Datum
+ts_unload(PG_FUNCTION_ARGS)
+{
+
+}
+
+/*
+ * Reload the dictionary using TS template's reload method.
+ */
+Datum
+ts_reload(PG_FUNCTION_ARGS)
+{
+
+}
