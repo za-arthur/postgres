@@ -25,6 +25,7 @@ typedef void *(*ispell_build_callback) (List *dictoptions, Size *size);
 
 extern void *ts_dict_shmem_location(Oid dictid, List *dictoptions,
 									ispell_build_callback allocate_cb);
+extern bool ts_dict_unload(Oid dictid);
 
 extern void TsearchShmemInit(void);
 extern Size TsearchShmemSize(void);

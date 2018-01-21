@@ -13,6 +13,7 @@
  */
 #include "postgres.h"
 
+#include "fmgr.h"
 #include "lib/dshash.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
@@ -203,6 +204,43 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 }
 
 /*
+ * Release space in shared memory occupied by the dictionary.
+ *
+ * dictid: Oid of the dictionary.
+ *
+ * Returns true if the dictionary was loaded into shared memory before and
+ * successfully released. Returns false if the dictionary wasn't loaded into
+ * shared memory before.
+ */
+bool
+ts_dict_unload(Oid dictid)
+{
+	TsearchDictEntry *entry;
+
+	init_dict_table();
+
+	/*
+	 * Return false if a hash table wasn't created.
+	 */
+	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle))
+		return false;
+
+	/* Try to find an entry in the hash table */
+	entry = (TsearchDictEntry *) dshash_find(dict_table, &dictid, true);
+
+	if (entry)
+	{
+		dsm_
+
+		dshash_delete_entry(dict_table, entry);
+
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * Allocate and initialize tsearch-related shared memory.
  */
 void
@@ -317,6 +355,8 @@ Datum
 ts_unload(PG_FUNCTION_ARGS)
 {
 
+
+	PG_RETURN_POINTER(NULL);
 }
 
 /*
@@ -325,5 +365,5 @@ ts_unload(PG_FUNCTION_ARGS)
 Datum
 ts_reload(PG_FUNCTION_ARGS)
 {
-
+	PG_RETURN_POINTER(NULL);
 }
