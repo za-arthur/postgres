@@ -33,18 +33,13 @@
 
 typedef struct
 {
-	char	   *dictfile;
-	char	   *afffile;
-} IspellBuildArg;
-
-typedef struct
-{
 	StopList	stoplist;
 	IspellDict	obj;
-	IspellBuildArg build_arg;
 } DictISpell;
 
-static void *dispell_build(void *arg, Size *size);
+static void parse_dictoptions(List *dictoptions,
+							  char **dictfile, char **afffile, char **stopfile);
+static void *dispell_build(List *dictoptions, Size *size);
 
 Datum
 dispell_init(PG_FUNCTION_ARGS)
@@ -52,79 +47,24 @@ dispell_init(PG_FUNCTION_ARGS)
 	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
 	Oid			dictid = PG_GETARG_OID(1);
 	DictISpell *d;
-	char	   *dictfile = NULL,
-			   *afffile = NULL;
-	bool		stoploaded = false;
-	ListCell   *l;
+	void	   *dict_location;
+	char	   *stopfile;
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
 
-	foreach(l, dictoptions)
-	{
-		DefElem    *defel = (DefElem *) lfirst(l);
+	parse_dictoptions(dictoptions, NULL, NULL, &stopfile);
 
-		if (pg_strcasecmp(defel->defname, "DictFile") == 0)
-		{
-			if (dictfile)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("multiple DictFile parameters")));
-			dictfile = get_tsearch_config_filename(defGetString(defel), "dict");
-		}
-		else if (pg_strcasecmp(defel->defname, "AffFile") == 0)
-		{
-			if (afffile)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("multiple AffFile parameters")));
-			afffile = get_tsearch_config_filename(defGetString(defel), "affix");
-		}
-		else if (pg_strcasecmp(defel->defname, "StopWords") == 0)
-		{
-			if (stoploaded)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("multiple StopWords parameters")));
-			readstoplist(defGetString(defel), &(d->stoplist), lowerstr);
-			stoploaded = true;
-		}
-		else
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("unrecognized Ispell parameter: \"%s\"",
-							defel->defname)));
-		}
-	}
+	if (stopfile)
+		readstoplist(stopfile, &(d->stoplist), lowerstr);
 
-	if (dictfile && afffile)
-	{
-		void	   *dict_location;
+	dict_location = ts_dict_shmem_location(dictid, dictoptions, dispell_build);
+	Assert(dict_location);
 
-		d->build_arg.dictfile = dictfile;
-		d->build_arg.afffile = afffile;
-
-		dict_location = ts_dict_shmem_location(dictid, &(d->build_arg), dispell_build);
-		Assert(dict_location);
-
-		d->obj.dict = (IspellDictData *) dict_location;
-		d->obj.reg = (AffixReg *) palloc0(d->obj.dict->nAffix *
-										  sizeof(AffixReg));
-		/* Current memory context is dictionary's private memory context */
-		d->obj.dictCtx = CurrentMemoryContext;
-	}
-	else if (!afffile)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("missing AffFile parameter")));
-	}
-	else
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("missing DictFile parameter")));
-	}
+	d->obj.dict = (IspellDictData *) dict_location;
+	d->obj.reg = (AffixReg *) palloc0(d->obj.dict->nAffix *
+									  sizeof(AffixReg));
+	/* Current memory context is dictionary's private memory context */
+	d->obj.dictCtx = CurrentMemoryContext;
 
 	PG_RETURN_POINTER(d);
 }
@@ -169,25 +109,99 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(res);
 }
 
+static void
+parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,
+				  char **stopfile)
+{
+	ListCell   *l;
+
+	if (dictfile)
+		*dictfile = NULL;
+	if (afffile)
+		*afffile = NULL;
+	if (stopfile)
+		*stopfile = NULL;
+
+	foreach(l, dictoptions)
+	{
+		DefElem    *defel = (DefElem *) lfirst(l);
+
+		if (pg_strcasecmp(defel->defname, "DictFile") == 0)
+		{
+			if (!dictfile)
+				continue;
+
+			if (*dictfile)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple DictFile parameters")));
+			*dictfile = get_tsearch_config_filename(defGetString(defel), "dict");
+		}
+		else if (pg_strcasecmp(defel->defname, "AffFile") == 0)
+		{
+			if (!afffile)
+				continue;
+
+			if (*afffile)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple AffFile parameters")));
+			*afffile = get_tsearch_config_filename(defGetString(defel), "affix");
+		}
+		else if (pg_strcasecmp(defel->defname, "StopWords") == 0)
+		{
+			if (!stopfile)
+				continue;
+
+			if (*stopfile)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple StopWords parameters")));
+			*stopfile = defGetString(defel);
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("unrecognized Ispell parameter: \"%s\"",
+							defel->defname)));
+		}
+	}
+}
+
 /*
  * Build the dictionary.
  *
  * Result is palloc'ed.
  */
 static void *
-dispell_build(void *arg, Size *size)
+dispell_build(List *dictoptions, Size *size)
 {
-	IspellBuildArg *build_arg = (IspellBuildArg *) arg;
 	IspellDictBuild build;
+	char	   *dictfile,
+			   *afffile;
 
-	Assert(build_arg->dictfile && build_arg->afffile);
+	parse_dictoptions(dictoptions, &dictfile, &afffile, NULL);
+
+	if (!afffile)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("missing AffFile parameter")));
+	}
+	else if (!dictfile)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("missing DictFile parameter")));
+	}
 
 	MemSet(&build, 0, sizeof(build));
 	NIStartBuild(&build);
 
 	/* Read files */
-	NIImportDictionary(&build, build_arg->dictfile);
-	NIImportAffixes(&build, build_arg->afffile);
+	NIImportDictionary(&build, dictfile);
+	NIImportAffixes(&build, afffile);
 
 	/* Build persistent data to use by backends */
 	NISortDictionary(&build);
