@@ -113,23 +113,23 @@ dispell_lexize(PG_FUNCTION_ARGS)
  * Release shared memory occupied by the dictionary. Raises an error if the
  * dictionary wasn't loaded into shared memory before.
  */
-Datum
-dispell_unload(PG_FUNCTION_ARGS)
-{
-	Oid			dictid = PG_GETARG_OID(1);
+//Datum
+//dispell_unload(PG_FUNCTION_ARGS)
+//{
+//	Oid			dictid = PG_GETARG_OID(1);
 
 
-}
+//}
 
 /*
  * Reload the dictionary by rereading configuration files. Raises an error if
  * the dictionary wasn't loaded into shared memory loaded before.
  */
-Datum
-dispell_reload(PG_FUNCTION_ARGS)
-{
+//Datum
+//dispell_reload(PG_FUNCTION_ARGS)
+//{
 
-}
+//}
 
 static void
 parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,

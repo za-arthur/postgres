@@ -96,9 +96,14 @@ InvalidateTSCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 	HASH_SEQ_STATUS status;
 	TSAnyCacheEntry *entry;
 
+	elog(INFO, "InvalidateTSCacheCallBack: %d", cacheid);
+
 	hash_seq_init(&status, hash);
 	while ((entry = (TSAnyCacheEntry *) hash_seq_search(&status)) != NULL)
+	{
+		elog(INFO, "%d", entry->objId);
 		entry->isvalid = false;
+	}
 
 	/* Also invalidate the current-config cache if it's pg_ts_config */
 	if (hash == TSConfigCacheHash)

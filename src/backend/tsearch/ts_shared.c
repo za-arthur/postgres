@@ -18,6 +18,7 @@
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
+#include "utils/fmgrprotos.h"
 #include "utils/hashutils.h"
 #include "utils/memutils.h"
 
@@ -28,18 +29,23 @@
 typedef struct
 {
 	Oid			dict_id;
-	dsm_handle	dict_dsm;
+	dsa_pointer	dict_pointer;
 } TsearchDictEntry;
 
 static dshash_table *dict_table = NULL;
+
+/* Area in shared memory for allocating chunks for dictionaries */
+static dsa_area *dict_dsa = NULL;
 
 /*
  * Shared struct for locking
  */
 typedef struct
 {
-	dsa_handle	area;
+	dsa_handle	table_area;
 	dshash_table_handle dict_table_handle;
+
+	dsa_handle	dict_area;
 
 	/* Total size of loaded dictionaries into shared memory in bytes */
 	Size		loaded_size;
@@ -87,7 +93,6 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 {
 	TsearchDictEntry *entry;
 	bool		found;
-	dsm_segment *seg;
 	void	   *dict,
 			   *dict_location;
 	Size		dict_size;
@@ -125,17 +130,11 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 
 	if (entry)
 	{
-		seg = dsm_find_mapping(entry->dict_dsm);
-		if (!seg)
-		{
-			seg = dsm_attach(entry->dict_dsm);
-			/* Remain attached until end of session */
-			dsm_pin_mapping(seg);
-		}
+		dict_location = dsa_get_address(dict_dsa, entry->dict_pointer);
 
 		dshash_release_lock(dict_table, entry);
 
-		return dsm_segment_address(seg);
+		return dict_location;
 	}
 
 	/* Dictionary haven't been loaded into memory yet */
@@ -148,14 +147,11 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 		 * Someone concurrently inserted a dictionary entry since the first time
 		 * we checked.
 		 */
-		seg = dsm_attach(entry->dict_dsm);
-
-		/* Remain attached until end of session */
-		dsm_pin_mapping(seg);
+		dict_location = dsa_get_address(dict_dsa, entry->dict_pointer);
 
 		dshash_release_lock(dict_table, entry);
 
-		return dsm_segment_address(seg);
+		return dict_location;
 	}
 
 	/* Build the dictionary */
@@ -183,24 +179,18 @@ ts_dict_shmem_location(Oid dictid, List *dictoptions,
 
 	LWLockRelease(&tsearch_ctl->lock);
 
-	/* At least, allocate a DSM segment for the compiled dictionary */
-	seg = dsm_create(dict_size, 0);
-	dict_location = dsm_segment_address(seg);
+	/* At least, allocate shared memory for the compiled dictionary */
+	entry->dict_id = dictid;
+	entry->dict_pointer = dsa_allocate(dict_dsa, dict_size);
+
+	dict_location = dsa_get_address(dict_dsa, entry->dict_pointer);
 	memcpy(dict_location, dict, dict_size);
 
 	pfree(dict);
 
-	entry->dict_id = dictid;
-	entry->dict_dsm = dsm_segment_handle(seg);
-
-	/* Remain attached until end of postmaster */
-	dsm_pin_segment(seg);
-	/* Remain attached until end of session */
-	dsm_pin_mapping(seg);
-
 	dshash_release_lock(dict_table, entry);
 
-	return dsm_segment_address(seg);
+	return dict_location;
 }
 
 /*
@@ -230,7 +220,7 @@ ts_dict_unload(Oid dictid)
 
 	if (entry)
 	{
-		dsm_
+		dsa_free(dict_dsa, entry->dict_pointer);
 
 		dshash_delete_entry(dict_table, entry);
 
@@ -258,7 +248,9 @@ TsearchShmemInit(void)
 
 		LWLockInitialize(&tsearch_ctl->lock, LWTRANCHE_TSEARCH_DSA);
 
+		tsearch_ctl->table_area = DSM_HANDLE_INVALID;
 		tsearch_ctl->dict_table_handle = InvalidDsaPointer;
+		tsearch_ctl->dict_area = DSM_HANDLE_INVALID;
 		tsearch_ctl->loaded_size = 0;
 	}
 }
@@ -308,14 +300,17 @@ recheck_table:
 	/* Hash table have been created already by someone */
 	if (DsaPointerIsValid(tsearch_ctl->dict_table_handle))
 	{
-		Assert(DsaPointerIsValid(tsearch_ctl->area));
+		Assert(tsearch_ctl->table_area != DSM_HANDLE_INVALID);
+		Assert(tsearch_ctl->dict_area != DSM_HANDLE_INVALID);
 
-		dsa = dsa_attach(tsearch_ctl->area);
+		dsa = dsa_attach(tsearch_ctl->table_area);
 
 		dict_table = dshash_attach(dsa,
 								   &dict_table_params,
 								   tsearch_ctl->dict_table_handle,
 								   NULL);
+
+		dict_dsa = dsa_attach(tsearch_ctl->dict_area);
 	}
 	else
 	{
@@ -331,19 +326,28 @@ recheck_table:
 		}
 
 		dsa = dsa_create(LWTRANCHE_TSEARCH_DSA);
-		tsearch_ctl->area = dsa_get_handle(dsa);
+		tsearch_ctl->table_area = dsa_get_handle(dsa);
 
 		dict_table = dshash_create(dsa, &dict_table_params, NULL);
 		tsearch_ctl->dict_table_handle = dshash_get_hash_table_handle(dict_table);
 
 		/* Remain attached until end of postmaster */
 		dsa_pin(dsa);
+
+		dict_dsa = dsa_create(LWTRANCHE_TSEARCH_DSA);
+		tsearch_ctl->dict_area = dsa_get_handle(dict_dsa);
+
+		/* Remain attached until end of postmaster */
+		dsa_pin(dict_dsa);
 	}
 
 	LWLockRelease(&tsearch_ctl->lock);
 
 	/* Remain attached until end of session */
 	dsa_pin_mapping(dsa);
+
+	/* Remain attached until end of session */
+	dsa_pin_mapping(dict_dsa);
 
 	MemoryContextSwitchTo(old_context);
 }
@@ -354,16 +358,16 @@ recheck_table:
 Datum
 ts_unload(PG_FUNCTION_ARGS)
 {
+	Oid			dictid = PG_GETARG_OID(0);
 
-
-	PG_RETURN_POINTER(NULL);
+	PG_RETURN_BOOL(ts_dict_unload(dictid));
 }
 
 /*
  * Reload the dictionary using TS template's reload method.
  */
-Datum
-ts_reload(PG_FUNCTION_ARGS)
-{
-	PG_RETURN_POINTER(NULL);
-}
+//Datum
+//ts_reload(PG_FUNCTION_ARGS)
+//{
+//	PG_RETURN_POINTER(NULL);
+//}
