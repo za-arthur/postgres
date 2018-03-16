@@ -207,6 +207,7 @@ static const char *const subdirs[] = {
 	"pg_serial",
 	"pg_snapshots",
 	"pg_subtrans",
+	"pg_tscache",
 	"pg_twophase",
 	"pg_multixact",
 	"pg_multixact/members",

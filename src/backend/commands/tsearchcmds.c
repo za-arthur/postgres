@@ -39,6 +39,7 @@
 #include "nodes/makefuncs.h"
 #include "parser/parse_func.h"
 #include "tsearch/ts_cache.h"
+#include "tsearch/ts_shared.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -513,6 +514,12 @@ RemoveTSDictionaryById(Oid dictId)
 
 	CatalogTupleDelete(relation, &tup->t_self);
 
+	/*
+	 * The dictionary was removed from catalog, release shared space if it was
+	 * occupied earlier.
+	 */
+	ts_dict_shared_release(dictId);
+
 	ReleaseSysCache(tup);
 
 	heap_close(relation, RowExclusiveLock);
@@ -617,6 +624,12 @@ AlterTSDictionary(AlterTSDictionaryStmt *stmt)
 							   repl_val, repl_null, repl_repl);
 
 	CatalogTupleUpdate(rel, &newtup->t_self, newtup);
+
+	/*
+	 * The dictionary was updated within catalog, release shared space if it was
+	 * occupied by the previous configured dictionary.
+	 */
+	ts_dict_shared_release(dictId);
 
 	InvokeObjectPostAlterHook(TSDictionaryRelationId, dictId, 0);
 
