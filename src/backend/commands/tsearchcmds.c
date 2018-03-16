@@ -397,7 +397,8 @@ verify_dictoptions(Oid tmplId, List *dictoptions)
 		 * Call the init method and see if it complains.  We don't worry about
 		 * it leaking memory, since our command will soon be over anyway.
 		 */
-		(void) OidFunctionCall1(initmethod, PointerGetDatum(dictoptions));
+		(void) OidFunctionCall2(initmethod, PointerGetDatum(dictoptions),
+								ObjectIdGetDatum(InvalidOid));
 	}
 
 	ReleaseSysCache(tup);
