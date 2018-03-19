@@ -118,6 +118,10 @@ dispell_lexize(PG_FUNCTION_ARGS)
 Datum
 dispell_unload(PG_FUNCTION_ARGS)
 {
+	Oid			dictid = PG_GETARG_OID(0);
+
+	ts_dict_shmem_release(dictid);
+
 	PG_RETURN_VOID();
 }
 

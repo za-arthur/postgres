@@ -501,6 +501,29 @@ DefineTSDictionary(List *names, List *parameters)
 }
 
 /*
+ * Release memory space occupied by a dictionary using a template's unload
+ * method.
+ */
+static void
+unload_dict(Oid dictId, Oid tmplId)
+{
+	HeapTuple	tup;
+	Form_pg_ts_template tform;
+
+	tup = SearchSysCache1(TSTEMPLATEOID, ObjectIdGetDatum(tmplId));
+	if (!HeapTupleIsValid(tup)) /* should not happen */
+		elog(ERROR, "cache lookup failed for text search template %u",
+			 tmplId);
+
+	tform = (Form_pg_ts_template) GETSTRUCT(tup);
+
+	if (OidIsValid(tform->tmplunload))
+		OidFunctionCall1(tform->tmplunload, ObjectIdGetDatum(dictId));
+
+	ReleaseSysCache(tup);
+}
+
+/*
  * Guts of TS dictionary deletion.
  */
 void
@@ -508,6 +531,7 @@ RemoveTSDictionaryById(Oid dictId)
 {
 	Relation	relation;
 	HeapTuple	tup;
+	Form_pg_ts_dict dict;
 
 	relation = heap_open(TSDictionaryRelationId, RowExclusiveLock);
 
@@ -517,9 +541,11 @@ RemoveTSDictionaryById(Oid dictId)
 		elog(ERROR, "cache lookup failed for text search dictionary %u",
 			 dictId);
 
-	CatalogTupleDelete(relation, &tup->t_self);
+	dict = (Form_pg_ts_dict) GETSTRUCT(tup);
 
-	ts_dict_shmem_release(dictId);
+	unload_dict(dictId, dict->dicttemplate);
+
+	CatalogTupleDelete(relation, &tup->t_self);
 
 	ReleaseSysCache(tup);
 

@@ -105,7 +105,9 @@ InvalidateTSCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 		{
 			TSDictionaryCacheEntry *dict_entry = (TSDictionaryCacheEntry *) entry;
 
-			ts_dict_shmem_release(dict_entry->dictId);
+			if (OidIsValid(dict_entry->unloadOid))
+				OidFunctionCall1(dict_entry->unloadOid,
+								 ObjectIdGetDatum(dict_entry->dictId));
 		}
 
 		entry->isvalid = false;
@@ -322,6 +324,11 @@ lookup_ts_dictionary_cache(Oid dictId)
 		entry->dictCtx = saveCtx;
 
 		entry->lexizeOid = template->tmpllexize;
+		/*
+		 * Unload function is called infrequently, we can store only method's
+		 * Oid.
+		 */
+		entry->unloadOid = template->tmplunload;
 
 		if (OidIsValid(template->tmplinit))
 		{

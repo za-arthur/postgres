@@ -58,6 +58,8 @@ typedef struct TSDictionaryCacheEntry
 	Oid			lexizeOid;
 	FmgrInfo	lexize;
 
+	Oid			unloadOid;
+
 	MemoryContext dictCtx;		/* memory context to store private data */
 	void	   *dictData;
 } TSDictionaryCacheEntry;
