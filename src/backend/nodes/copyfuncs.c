@@ -4414,6 +4414,17 @@ _copyAlterTSDictionaryStmt(const AlterTSDictionaryStmt *from)
 	return newnode;
 }
 
+static AlterTSDictionaryMemoryStmt *
+_copyAlterTSDictionaryMemoryStmt(const AlterTSDictionaryMemoryStmt *from)
+{
+	AlterTSDictionaryMemoryStmt *newnode = makeNode(AlterTSDictionaryMemoryStmt);
+
+	COPY_NODE_FIELD(dictname);
+	COPY_SCALAR_FIELD(is_unload);
+
+	return newnode;
+}
+
 static AlterTSConfigurationStmt *
 _copyAlterTSConfigurationStmt(const AlterTSConfigurationStmt *from)
 {
@@ -5412,6 +5423,9 @@ copyObjectImpl(const void *from)
 			break;
 		case T_AlterTSDictionaryStmt:
 			retval = _copyAlterTSDictionaryStmt(from);
+			break;
+		case T_AlterTSDictionaryMemoryStmt:
+			retval = _copyAlterTSDictionaryMemoryStmt(from);
 			break;
 		case T_AlterTSConfigurationStmt:
 			retval = _copyAlterTSConfigurationStmt(from);

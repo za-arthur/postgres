@@ -4907,6 +4907,8 @@ DATA(insert OID = 3731 (  dispell_init		PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0
 DESCR("(internal)");
 DATA(insert OID = 3732 (  dispell_lexize	PGNSP PGUID 12 1 0 0 0 f f f t f i s 4 0 2281 "2281 2281 2281 2281" _null_ _null_ _null_ _null_ _null_ dispell_lexize _null_ _null_ _null_ ));
 DESCR("(internal)");
+DATA(insert OID = 2579 (  dispell_unload	PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 2281 "2281" _null_ _null_ _null_ _null_ _null_ dispell_unload _null_ _null_ _null_ ));
+DESCR("(internal)");
 
 DATA(insert OID = 3740 (  thesaurus_init	PGNSP PGUID 12 1 0 0 0 f f f t f i s 1 0 2281 "2281" _null_ _null_ _null_ _null_ _null_ thesaurus_init _null_ _null_ _null_ ));
 DESCR("(internal)");

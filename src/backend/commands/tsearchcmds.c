@@ -673,6 +673,9 @@ get_ts_template_func(DefElem *defel, int attnum)
 		case Anum_pg_ts_template_tmpllexize:
 			nargs = 4;
 			break;
+		case Anum_pg_ts_template_tmplunload:
+			nargs = 1;
+			break;
 		default:
 			/* should not be here */
 			elog(ERROR, "unrecognized attribute for text search template: %d",
@@ -784,6 +787,12 @@ DefineTSTemplate(List *names, List *parameters)
 			values[Anum_pg_ts_template_tmpllexize - 1] =
 				get_ts_template_func(defel, Anum_pg_ts_template_tmpllexize);
 			nulls[Anum_pg_ts_template_tmpllexize - 1] = false;
+		}
+		else if (strcmp(defel->defname, "unload") == 0)
+		{
+			values[Anum_pg_ts_template_tmplunload - 1] =
+				get_ts_template_func(defel, Anum_pg_ts_template_tmplunload);
+			nulls[Anum_pg_ts_template_tmplunload - 1] = false;
 		}
 		else
 			ereport(ERROR,

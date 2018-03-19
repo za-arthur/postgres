@@ -198,6 +198,7 @@ check_xact_readonly(Node *parsetree)
 		case T_DropOwnedStmt:
 		case T_ReassignOwnedStmt:
 		case T_AlterTSDictionaryStmt:
+		case T_AlterTSDictionaryMemoryStmt:
 		case T_AlterTSConfigurationStmt:
 		case T_CreateExtensionStmt:
 		case T_AlterExtensionStmt:
@@ -1535,6 +1536,9 @@ ProcessUtilitySlow(ParseState *pstate,
 				address = AlterTSDictionary((AlterTSDictionaryStmt *) parsetree);
 				break;
 
+			case T_AlterTSDictionaryMemoryStmt:
+				break;
+
 			case T_AlterTSConfigurationStmt:
 				AlterTSConfiguration((AlterTSConfigurationStmt *) parsetree);
 
@@ -2709,6 +2713,10 @@ CreateCommandTag(Node *parsetree)
 			tag = "ALTER TEXT SEARCH DICTIONARY";
 			break;
 
+		case T_AlterTSDictionaryMemoryStmt:
+			tag = "ALTER TEXT SEARCH DICTIONARY";
+			break;
+
 		case T_AlterTSConfigurationStmt:
 			tag = "ALTER TEXT SEARCH CONFIGURATION";
 			break;
@@ -3314,6 +3322,7 @@ GetCommandLogLevel(Node *parsetree)
 			break;
 
 		case T_AlterTSDictionaryStmt:
+		case T_AlterTSDictionaryMemoryStmt:
 			lev = LOGSTMT_DDL;
 			break;
 

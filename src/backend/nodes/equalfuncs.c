@@ -2200,6 +2200,16 @@ _equalAlterTSDictionaryStmt(const AlterTSDictionaryStmt *a, const AlterTSDiction
 }
 
 static bool
+_equalAlterTSDictionaryMemoryStmt(const AlterTSDictionaryMemoryStmt *a,
+								  const AlterTSDictionaryMemoryStmt *b)
+{
+	COMPARE_NODE_FIELD(dictname);
+	COMPARE_SCALAR_FIELD(is_unload);
+
+	return true;
+}
+
+static bool
 _equalAlterTSConfigurationStmt(const AlterTSConfigurationStmt *a,
 							   const AlterTSConfigurationStmt *b)
 {
@@ -3544,6 +3554,9 @@ equal(const void *a, const void *b)
 			break;
 		case T_AlterTSDictionaryStmt:
 			retval = _equalAlterTSDictionaryStmt(a, b);
+			break;
+		case T_AlterTSDictionaryMemoryStmt:
+			retval = _equalAlterTSDictionaryMemoryStmt(a, b);
 			break;
 		case T_AlterTSConfigurationStmt:
 			retval = _equalAlterTSConfigurationStmt(a, b);

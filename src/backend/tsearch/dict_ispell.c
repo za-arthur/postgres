@@ -115,6 +115,12 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	PG_RETURN_POINTER(res);
 }
 
+Datum
+dispell_unload(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_VOID();
+}
+
 static void
 parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,
 				  char **stopfile, bool *isshared)
