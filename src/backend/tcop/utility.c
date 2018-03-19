@@ -1537,6 +1537,8 @@ ProcessUtilitySlow(ParseState *pstate,
 				break;
 
 			case T_AlterTSDictionaryMemoryStmt:
+				address = AlterTSDictionaryMemory(
+					(AlterTSDictionaryMemoryStmt *) parsetree);
 				break;
 
 			case T_AlterTSConfigurationStmt:

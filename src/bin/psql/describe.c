@@ -4456,11 +4456,13 @@ listTSTemplates(const char *pattern, bool verbose)
 						  "  t.tmplname AS \"%s\",\n"
 						  "  t.tmplinit::pg_catalog.regproc AS \"%s\",\n"
 						  "  t.tmpllexize::pg_catalog.regproc AS \"%s\",\n"
+						  "  t.tmplunload::pg_catalog.regproc AS \"%s\",\n"
 						  "  pg_catalog.obj_description(t.oid, 'pg_ts_template') AS \"%s\"\n",
 						  gettext_noop("Schema"),
 						  gettext_noop("Name"),
 						  gettext_noop("Init"),
 						  gettext_noop("Lexize"),
+						  gettext_noop("Unload"),
 						  gettext_noop("Description"));
 	else
 		printfPQExpBuffer(&buf,

@@ -509,6 +509,7 @@ typedef struct _tmplInfo
 	DumpableObject dobj;
 	Oid			tmplinit;
 	Oid			tmpllexize;
+	Oid			tmplunload;
 } TSTemplateInfo;
 
 typedef struct _cfgInfo

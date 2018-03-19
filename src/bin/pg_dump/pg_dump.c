@@ -8715,6 +8715,7 @@ getTSTemplates(Archive *fout, int *numTSTemplates)
 	int			i_tmplnamespace;
 	int			i_tmplinit;
 	int			i_tmpllexize;
+	int			i_tmplunload;
 
 	/* Before 8.3, there is no built-in text search support */
 	if (fout->remoteVersion < 80300)
@@ -8726,7 +8727,8 @@ getTSTemplates(Archive *fout, int *numTSTemplates)
 	query = createPQExpBuffer();
 
 	appendPQExpBufferStr(query, "SELECT tableoid, oid, tmplname, "
-						 "tmplnamespace, tmplinit::oid, tmpllexize::oid "
+						 "tmplnamespace, tmplinit::oid, tmpllexize::oid, "
+						 "tmplunload::oid "
 						 "FROM pg_ts_template");
 
 	res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
@@ -8742,6 +8744,7 @@ getTSTemplates(Archive *fout, int *numTSTemplates)
 	i_tmplnamespace = PQfnumber(res, "tmplnamespace");
 	i_tmplinit = PQfnumber(res, "tmplinit");
 	i_tmpllexize = PQfnumber(res, "tmpllexize");
+	i_tmplunload = PQfnumber(res, "tmplunload");
 
 	for (i = 0; i < ntups; i++)
 	{
@@ -8755,6 +8758,7 @@ getTSTemplates(Archive *fout, int *numTSTemplates)
 						  atooid(PQgetvalue(res, i, i_tmplnamespace)));
 		tmplinfo[i].tmplinit = atooid(PQgetvalue(res, i, i_tmplinit));
 		tmplinfo[i].tmpllexize = atooid(PQgetvalue(res, i, i_tmpllexize));
+		tmplinfo[i].tmplunload = atooid(PQgetvalue(res, i, i_tmplunload));
 
 		/* Decide whether we want to dump it */
 		selectDumpableObject(&(tmplinfo[i].dobj), fout);
@@ -14128,6 +14132,9 @@ dumpTSTemplate(Archive *fout, TSTemplateInfo *tmplinfo)
 	if (tmplinfo->tmplinit != InvalidOid)
 		appendPQExpBuffer(q, "    INIT = %s,\n",
 						  convertTSFunction(fout, tmplinfo->tmplinit));
+	if (tmplinfo->tmplunload != InvalidOid)
+		appendPQExpBuffer(q, "    UNLOAD = %s,\n",
+						  convertTSFunction(fout, tmplinfo->tmplunload));
 	appendPQExpBuffer(q, "    LEXIZE = %s );\n",
 					  convertTSFunction(fout, tmplinfo->tmpllexize));
 

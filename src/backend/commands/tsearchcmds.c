@@ -644,6 +644,27 @@ AlterTSDictionary(AlterTSDictionaryStmt *stmt)
 	return address;
 }
 
+/*
+ * ALTER TEXT SEARCH DICTIONARY RELOAD/UNLOAD
+ */
+ObjectAddress
+AlterTSDictionaryMemory(AlterTSDictionaryMemoryStmt *stmt)
+{
+	Oid			dictId;
+	ObjectAddress address;
+
+	dictId = get_ts_dict_oid(stmt->dictname, false);
+
+	ObjectAddressSet(address, TSDictionaryRelationId, dictId);
+
+	/*
+	 * NOTE: because we only support reloading/unloading the dictionary, not the
+	 * template, there is no need to update dependencies.
+	 */
+
+	return address;
+}
+
 /* ---------------------- TS Template commands -----------------------*/
 
 /*
