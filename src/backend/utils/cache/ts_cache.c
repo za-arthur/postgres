@@ -40,6 +40,7 @@
 #include "commands/defrem.h"
 #include "tsearch/ts_cache.h"
 #include "tsearch/ts_public.h"
+#include "tsearch/ts_shared.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/fmgroids.h"
@@ -99,7 +100,16 @@ InvalidateTSCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 
 	hash_seq_init(&status, hash);
 	while ((entry = (TSAnyCacheEntry *) hash_seq_search(&status)) != NULL)
+	{
+		if (entry->isvalid && hash == TSDictionaryCacheHash)
+		{
+			TSDictionaryCacheEntry *dict_entry = (TSDictionaryCacheEntry *) entry;
+
+			ts_dict_shmem_release(dict_entry->dictId);
+		}
+
 		entry->isvalid = false;
+	}
 
 	/* Also invalidate the current-config cache if it's pg_ts_config */
 	if (hash == TSConfigCacheHash)

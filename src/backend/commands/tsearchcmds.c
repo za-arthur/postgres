@@ -39,6 +39,7 @@
 #include "nodes/makefuncs.h"
 #include "parser/parse_func.h"
 #include "tsearch/ts_cache.h"
+#include "tsearch/ts_shared.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -517,6 +518,8 @@ RemoveTSDictionaryById(Oid dictId)
 			 dictId);
 
 	CatalogTupleDelete(relation, &tup->t_self);
+
+	ts_dict_shmem_release(dictId);
 
 	ReleaseSysCache(tup);
 
