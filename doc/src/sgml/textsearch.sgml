@@ -3045,6 +3045,12 @@ CREATE TEXT SEARCH DICTIONARY english_stem (
     parameter value greater than zero before server starting.
    </para>
 
+   <para>
+    List of dictionaries currently located in shared memory can be retreived by
+    <link linkend="view-pg-ts-shared-dictionaries"><structname>pg_ts_shared_dictionaries</structname></link>
+    view.
+   </para>
+
   </sect2>
 
  </sect1>
