@@ -39,6 +39,7 @@
 #include "catalog/pg_ts_template.h"
 #include "commands/defrem.h"
 #include "tsearch/ts_cache.h"
+#include "tsearch/ts_public.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/fmgroids.h"
@@ -314,6 +315,7 @@ lookup_ts_dictionary_cache(Oid dictId)
 
 		if (OidIsValid(template->tmplinit))
 		{
+			DictInitData init_data;
 			List	   *dictoptions;
 			Datum		opt;
 			bool		isnull;
@@ -333,9 +335,12 @@ lookup_ts_dictionary_cache(Oid dictId)
 			else
 				dictoptions = deserialize_deflist(opt);
 
+			init_data.dictoptions = dictoptions;
+			init_data.dictid = dictId;
+
 			entry->dictData =
 				DatumGetPointer(OidFunctionCall1(template->tmplinit,
-												 PointerGetDatum(dictoptions)));
+												 PointerGetDatum(&init_data)));
 
 			MemoryContextSwitchTo(oldcontext);
 		}
