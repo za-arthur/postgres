@@ -3030,6 +3030,23 @@ CREATE TEXT SEARCH DICTIONARY english_stem (
 
   </sect2>
 
+  <sect2 id="textsearch-shared-dictionaries">
+   <title>Dictionaries in Shared Memory</title>
+
+   <para>
+    Some dictionaries, especially <application>Ispell</application>, consumes a
+    noticable value of memory.  Size of a dictionary can reach tens of megabytes.
+    Most of them also stores configuration in text files.  A dictionary is compiled
+    during first access per a user session.
+   </para>
+
+   <para>
+    To store dictionaries in shared memory set to <xref linkend="guc-max-shared-dictionaries-size"/>
+    parameter value greater than zero before server starting.
+   </para>
+
+  </sect2>
+
  </sect1>
 
  <sect1 id="textsearch-configuration">
