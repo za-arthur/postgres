@@ -38,7 +38,8 @@ typedef struct
 } DictISpell;
 
 static void parse_dictoptions(List *dictoptions,
-							  char **dictfile, char **afffile, char **stopfile);
+							  char **dictfile, char **afffile, char **stopfile,
+							  bool *isshared);
 static void *dispell_build(List *dictoptions, Size *size);
 
 Datum
@@ -48,15 +49,21 @@ dispell_init(PG_FUNCTION_ARGS)
 	DictISpell *d;
 	void	   *dict_location;
 	char	   *stopfile;
+	bool		isshared;
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
 
-	parse_dictoptions(init_data->dictoptions, NULL, NULL, &stopfile);
+	parse_dictoptions(init_data->dictoptions, NULL, NULL, &stopfile, &isshared);
 
+	/* Make stop word list */
 	if (stopfile)
 		readstoplist(stopfile, &(d->stoplist), lowerstr);
 
-	dict_location = ts_dict_shmem_location(init_data, dispell_build);
+	/* Make or get from shared memory dictionary itself */
+	if (isshared)
+		dict_location = ts_dict_shmem_location(init_data, dispell_build);
+	else
+		dict_location = dispell_build(init_data->dictoptions, NULL);
 	Assert(dict_location);
 
 	d->obj.dict = (IspellDictData *) dict_location;
@@ -110,9 +117,10 @@ dispell_lexize(PG_FUNCTION_ARGS)
 
 static void
 parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,
-				  char **stopfile)
+				  char **stopfile, bool *isshared)
 {
 	ListCell   *l;
+	bool		isshared_defined = false;
 
 	if (dictfile)
 		*dictfile = NULL;
@@ -120,6 +128,8 @@ parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,
 		*afffile = NULL;
 	if (stopfile)
 		*stopfile = NULL;
+	if (isshared)
+		*isshared = true;
 
 	foreach(l, dictoptions)
 	{
@@ -158,6 +168,19 @@ parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,
 						 errmsg("multiple StopWords parameters")));
 			*stopfile = defGetString(defel);
 		}
+		else if (pg_strcasecmp(defel->defname, "Shareable") == 0)
+		{
+			if (!isshared)
+				continue;
+
+			if (isshared_defined)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple Shareable parameters")));
+
+			*isshared = defGetBoolean(defel);
+			isshared_defined = true;
+		}
 		else
 		{
 			ereport(ERROR,
@@ -180,7 +203,7 @@ dispell_build(List *dictoptions, Size *size)
 	char	   *dictfile,
 			   *afffile;
 
-	parse_dictoptions(dictoptions, &dictfile, &afffile, NULL);
+	parse_dictoptions(dictoptions, &dictfile, &afffile, NULL, NULL);
 
 	if (!afffile)
 	{
@@ -212,6 +235,7 @@ dispell_build(List *dictoptions, Size *size)
 	NIFinishBuild(&build);
 
 	/* Return the buffer and its size */
-	*size = build.dict_size;
+	if (size)
+		*size = build.dict_size;
 	return build.dict;
 }
