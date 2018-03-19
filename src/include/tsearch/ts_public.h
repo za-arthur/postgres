@@ -13,6 +13,7 @@
 #ifndef _PG_TS_PUBLIC_H_
 #define _PG_TS_PUBLIC_H_
 
+#include "nodes/pg_list.h"
 #include "tsearch/ts_type.h"
 
 /*
@@ -83,6 +84,19 @@ extern bool searchstoplist(StopList *s, char *key);
 /*
  * Interface with dictionaries
  */
+
+/*
+ * Argument which is passed to a template's init method.
+ */
+typedef struct
+{
+	/*
+	 * A dictionary option list for a template's init method. Should go first
+	 * for backward compatibility.
+	 */
+	List	   *dictoptions;
+	Oid			dictid;
+} DictInitData;
 
 /* return struct for any lexize function */
 typedef struct

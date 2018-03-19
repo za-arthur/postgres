@@ -386,17 +386,22 @@ verify_dictoptions(Oid tmplId, List *dictoptions)
 	}
 	else
 	{
+		DictInitData init_data;
+
 		/*
 		 * Copy the options just in case init method thinks it can scribble on
 		 * them ...
 		 */
 		dictoptions = copyObject(dictoptions);
 
+		init_data.dictoptions = dictoptions;
+		init_data.dictid = InvalidOid;
+
 		/*
 		 * Call the init method and see if it complains.  We don't worry about
 		 * it leaking memory, since our command will soon be over anyway.
 		 */
-		(void) OidFunctionCall1(initmethod, PointerGetDatum(dictoptions));
+		(void) OidFunctionCall1(initmethod, PointerGetDatum(&init_data));
 	}
 
 	ReleaseSysCache(tup);
