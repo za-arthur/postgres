@@ -4975,6 +4975,9 @@ DESCR("trigger for automatic update of tsvector column");
 DATA(insert OID = 3759 (  get_current_ts_config PGNSP PGUID 12 1 0 0 0 f f f t f s s 0 0 3734 "" _null_ _null_ _null_ _null_ _null_ get_current_ts_config _null_ _null_ _null_ ));
 DESCR("get current tsearch configuration");
 
+DATA(insert OID = 4213 (  pg_ts_shared_dictionaries PGNSP PGUID 12 1 10 0 0 f f f f t s s 0 0 2249 "" "{26,19,19,20}" "{o,o,o,o}" "{dictoid,schemaname,dictname,size}" _null_ _null_ pg_ts_shared_dictionaries _null_ _null_ _null_ ));
+DESCR("information about text search dictionaries currently in shared memory");
+
 DATA(insert OID = 3736 (  regconfigin		PGNSP PGUID 12 1 0 0 0 f f f t f s s 1 0 3734 "2275" _null_ _null_ _null_ _null_ _null_ regconfigin _null_ _null_ _null_ ));
 DESCR("I/O");
 DATA(insert OID = 3737 (  regconfigout		PGNSP PGUID 12 1 0 0 0 f f f t f s s 1 0 2275 "3734" _null_ _null_ _null_ _null_ _null_ regconfigout _null_ _null_ _null_ ));

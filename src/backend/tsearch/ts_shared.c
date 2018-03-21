@@ -13,11 +13,18 @@
  */
 #include "postgres.h"
 
+#include "funcapi.h"
+#include "miscadmin.h"
+
+#include "access/htup_details.h"
+#include "catalog/pg_ts_dict.h"
 #include "lib/dshash.h"
 #include "storage/lwlock.h"
 #include "storage/shmem.h"
 #include "tsearch/ts_shared.h"
+#include "utils/builtins.h"
 #include "utils/hashutils.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
 
 
@@ -376,4 +383,101 @@ recheck_table:
 	dsa_pin_mapping(dsa);
 
 	MemoryContextSwitchTo(old_context);
+}
+
+/*
+ * pg_ts_shared_dictionaries - SQL SRF showing dictionaries currently in
+ * shared memory.
+ */
+Datum
+pg_ts_shared_dictionaries(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo *rsinfo = (ReturnSetInfo *) fcinfo->resultinfo;
+	MemoryContext oldcontext;
+	TupleDesc	tupdesc;
+	Tuplestorestate *tupstore;
+	Relation	rel;
+	HeapTuple	tuple;
+	SysScanDesc scan;
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not " \
+						"allowed in this context")));
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	/* Build tuplestore to hold the result rows */
+	oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	init_dict_table();
+
+	/*
+	 * If a hash table wasn't created return zero records.
+	 */
+	if (!DsaPointerIsValid(tsearch_ctl->dict_table_handle))
+	{
+		tuplestore_donestoring(tupstore);
+
+		PG_RETURN_VOID();
+	}
+
+	/* Start to scan pg_ts_dict */
+	rel = heap_open(TSDictionaryRelationId, AccessShareLock);
+	scan = systable_beginscan(rel, InvalidOid, false, NULL, 0, NULL);
+
+	while (HeapTupleIsValid(tuple = systable_getnext(scan)))
+	{
+		Datum		values[4];
+		bool		nulls[4];
+		Form_pg_ts_dict dict = (Form_pg_ts_dict) GETSTRUCT(tuple);
+		Oid			dictid = HeapTupleGetOid(tuple);
+		TsearchDictEntry *entry;
+		NameData	dict_name;
+
+		/* If dictionary isn't located in shared memory try following */
+		entry = (TsearchDictEntry *) dshash_find(dict_table, &dictid, false);
+		if (!entry)
+			continue;
+
+		namecpy(&dict_name, &dict->dictname);
+
+		memset(nulls, 0, sizeof(nulls));
+
+		values[0] = ObjectIdGetDatum(dictid);
+
+		if (OidIsValid(dict->dictnamespace))
+			values[1] = CStringGetDatum(get_namespace_name(dict->dictnamespace));
+		else
+			nulls[1] = true;
+
+		values[2] = NameGetDatum(&dict_name);
+		values[3] = Int64GetDatum(entry->dict_size);
+
+		dshash_release_lock(dict_table, entry);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+	}
+
+	systable_endscan(scan);
+	heap_close(rel, AccessShareLock);
+
+	tuplestore_donestoring(tupstore);
+
+	PG_RETURN_VOID();
 }
