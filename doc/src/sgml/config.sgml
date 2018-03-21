@@ -1425,6 +1425,42 @@ include_dir 'conf.d'
       </listitem>
      </varlistentry>
 
+     <varlistentry id="guc-max-shared-dictionaries-size" xreflabel="max_shared_dictionaries_size">
+      <term><varname>max_shared_dictionaries_size</varname> (<type>integer</type>)
+      <indexterm>
+       <primary><varname>max_shared_dictionaries_size</varname> configuration parameter</primary>
+      </indexterm>
+      </term>
+      <listitem>
+       <para>
+        Specifies the amount of shared memory to be used to store full-text search
+        search dictionaries.  A value of <literal>-1</literal> means no limit of
+        the size of loaded dictionaries.  A value of <literal>0</literal>
+        disables shared dictionaries feature.  The default is 100 megabytes
+        (<literal>100MB</literal>).
+       </para>
+
+       <para>
+        Currently only <application>Ispell</application> dictionaries (see
+        <xref linkend="textsearch-ispell-dictionary"/>) may be loaded into
+        shared memory. The first backend requesting the dictionary will
+        build it and copy it into shared memory, so that other backends can
+        reuse it without having to build it again.
+       </para>
+
+       <para>
+        If the size of simultaneously loaded dictionaries reaches the maximum
+        allowed size, additional dictionares will be loaded into private backend
+        memory (effectively disabling the sharing).
+       </para>
+
+       <para>
+        This parameter can only be set in the <filename>postgresql.conf</filename>
+        file or on the server command line.
+       </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="guc-huge-pages" xreflabel="huge_pages">
       <term><varname>huge_pages</varname> (<type>enum</type>)
       <indexterm>
