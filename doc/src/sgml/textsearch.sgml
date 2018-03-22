@@ -2829,6 +2829,7 @@ iconv -f ISO_8859-1 -t UTF-8 -o nn_no.dict nn_NO.dic
 <programlisting>
 CREATE TEXT SEARCH DICTIONARY english_hunspell (
     TEMPLATE = ispell,
+    Shareable = false,
     DictFile = en_us,
     AffFile = en_us,
     Stopwords = english);
@@ -2843,6 +2844,9 @@ CREATE TEXT SEARCH DICTIONARY english_hunspell (
     The stop-words file has the same format explained above for the
     <literal>simple</literal> dictionary type.  The format of the other files is
     not specified here but is available from the above-mentioned web sites.
+    <literal>Shareable</literal> controls loading into shared memory.  By
+    default it is <literal>true</literal> (see more in
+    <xref linkend="textsearch-shared-dictionaries"/>).
    </para>
 
    <para>
@@ -3040,6 +3044,8 @@ CREATE TEXT SEARCH DICTIONARY english_stem (
     both CPU and time-consuming.  Instead of doing this in each backend when
     it needs a dictionary for the first time, the compiled dictionary may be
     stored in shared memory so that it may be reused by other backends.
+    Currently only <application>Ispell</application> supports loading into
+    shared memory.
    </para>
 
    <para>
