@@ -390,17 +390,25 @@ verify_dictoptions(Oid tmplId, List *dictoptions)
 	}
 	else
 	{
+		DictInitData init_data;
+
 		/*
 		 * Copy the options just in case init method thinks it can scribble on
 		 * them ...
 		 */
 		dictoptions = copyObject(dictoptions);
 
+		init_data.dict_options = dictoptions;
+		init_data.dict.id = InvalidOid;
+		init_data.dict.xmin = InvalidTransactionId;
+		init_data.dict.xmax = InvalidTransactionId;
+		ItemPointerSetInvalid(&init_data.dict.tid);
+
 		/*
 		 * Call the init method and see if it complains.  We don't worry about
 		 * it leaking memory, since our command will soon be over anyway.
 		 */
-		(void) OidFunctionCall1(initmethod, PointerGetDatum(dictoptions));
+		(void) OidFunctionCall1(initmethod, PointerGetDatum(&init_data));
 	}
 
 	ReleaseSysCache(tup);

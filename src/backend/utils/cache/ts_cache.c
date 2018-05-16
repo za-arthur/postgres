@@ -39,6 +39,7 @@
 #include "catalog/pg_ts_template.h"
 #include "commands/defrem.h"
 #include "tsearch/ts_cache.h"
+#include "tsearch/ts_public.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/fmgroids.h"
@@ -75,6 +76,7 @@ static TSConfigCacheEntry *lastUsedConfig = NULL;
 char	   *TSCurrentConfig = NULL;
 
 static Oid	TSCurrentConfigCache = InvalidOid;
+static bool has_invalid_dictionary = false;
 
 
 /*
@@ -98,7 +100,12 @@ InvalidateTSCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 
 	hash_seq_init(&status, hash);
 	while ((entry = (TSAnyCacheEntry *) hash_seq_search(&status)) != NULL)
+	{
+		if (cacheid == TSDICTOID)
+			has_invalid_dictionary = true;
+
 		entry->isvalid = false;
+	}
 
 	/* Also invalidate the current-config cache if it's pg_ts_config */
 	if (hash == TSConfigCacheHash)
@@ -312,11 +319,15 @@ lookup_ts_dictionary_cache(Oid dictId)
 		MemSet(entry, 0, sizeof(TSDictionaryCacheEntry));
 		entry->dictId = dictId;
 		entry->dictCtx = saveCtx;
+		entry->dict_xmin = HeapTupleHeaderGetRawXmin(tpdict->t_data);
+		entry->dict_xmax = HeapTupleHeaderGetRawXmax(tpdict->t_data);
+		entry->dict_tid = tpdict->t_self;
 
 		entry->lexizeOid = template->tmpllexize;
 
 		if (OidIsValid(template->tmplinit))
 		{
+			DictInitData init_data;
 			List	   *dictoptions;
 			Datum		opt;
 			bool		isnull;
@@ -336,9 +347,15 @@ lookup_ts_dictionary_cache(Oid dictId)
 			else
 				dictoptions = deserialize_deflist(opt);
 
+			init_data.dict_options = dictoptions;
+			init_data.dict.id = dictId;
+			init_data.dict.xmin = entry->dict_xmin;
+			init_data.dict.xmax = entry->dict_xmax;
+			init_data.dict.tid = entry->dict_tid;
+
 			entry->dictData =
 				DatumGetPointer(OidFunctionCall1(template->tmplinit,
-												 PointerGetDatum(dictoptions)));
+												 PointerGetDatum(&init_data)));
 
 			MemoryContextSwitchTo(oldcontext);
 		}
