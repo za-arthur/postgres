@@ -40,6 +40,7 @@
 #include "commands/defrem.h"
 #include "tsearch/ts_cache.h"
 #include "tsearch/ts_public.h"
+#include "tsearch/ts_shared.h"
 #include "utils/builtins.h"
 #include "utils/catcache.h"
 #include "utils/fmgroids.h"
@@ -88,6 +89,10 @@ static bool has_invalid_dictionary = false;
  * doesn't seem worth the trouble to determine that; we just flush all the
  * entries of the related hash table.
  *
+ * We set has_invalid_dictionary to true to unpin all used segments later on
+ * a first text search function usage.  It isn't safe to call
+ * ts_dict_shmem_release() here since it may call kernel functions.
+ *
  * We can use the same function for all TS caches by passing the hash
  * table address as the "arg".
  */
@@ -110,6 +115,33 @@ InvalidateTSCacheCallBack(Datum arg, int cacheid, uint32 hashvalue)
 	/* Also invalidate the current-config cache if it's pg_ts_config */
 	if (hash == TSConfigCacheHash)
 		TSCurrentConfigCache = InvalidOid;
+}
+
+/*
+ * Unpin shared segments of all dictionary entries.
+ */
+static void
+do_ts_dict_shmem_release(void)
+{
+	HASH_SEQ_STATUS status;
+	TSDictionaryCacheEntry *entry;
+
+	if (!has_invalid_dictionary)
+		return;
+
+	hash_seq_init(&status, TSDictionaryCacheHash);
+	while ((entry = (TSDictionaryCacheEntry *) hash_seq_search(&status)) != NULL)
+	{
+		DictPointerData dict_ptr;
+
+		dict_ptr.id = entry->dictId;
+		dict_ptr.xmin = entry->dict_xmin;
+		dict_ptr.xmax = entry->dict_xmax;
+		dict_ptr.tid = entry->dict_tid;
+		ts_dict_shmem_release(&dict_ptr, false);
+	}
+
+	has_invalid_dictionary = false;
 }
 
 /*
@@ -259,6 +291,13 @@ lookup_ts_dictionary_cache(Oid dictId)
 		Form_pg_ts_dict dict;
 		Form_pg_ts_template template;
 		MemoryContext saveCtx;
+
+		/*
+		 * It is possible that some invalid entries hold a DSM mapping and we
+		 * need to unpin it to avoid memory leaking.  We will unpin segments of
+		 * all other invalid dictionaries.
+		 */
+		do_ts_dict_shmem_release();
 
 		tpdict = SearchSysCache1(TSDICTOID, ObjectIdGetDatum(dictId));
 		if (!HeapTupleIsValid(tpdict))
