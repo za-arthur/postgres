@@ -58,6 +58,12 @@ static const char *excludeDirContents[] =
 	 */
 	"pg_replslot",
 
+	/*
+	 * Skip compiled dictionaries files. A dictionary will be compiled on first
+	 * demand.
+	 */
+	"pg_shdict",
+
 	/* Contents removed on startup, see dsm_cleanup_for_mmap(). */
 	"pg_dynshmem",				/* defined as PG_DYNSHMEM_DIR */
 

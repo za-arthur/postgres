@@ -3977,6 +3977,9 @@ pgstat_get_wait_io(WaitEventIO w)
 		case WAIT_EVENT_TIMELINE_HISTORY_WRITE:
 			event_name = "TimelineHistoryWrite";
 			break;
+		case WAIT_EVENT_TS_SHARED_DICT_WRITE:
+			event_name = "TSSharedDictWrite";
+			break;
 		case WAIT_EVENT_TWOPHASE_FILE_READ:
 			event_name = "TwophaseFileRead";
 			break;
