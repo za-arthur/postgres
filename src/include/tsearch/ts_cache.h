@@ -54,6 +54,9 @@ typedef struct TSDictionaryCacheEntry
 	Oid			dictId;
 	bool		isvalid;
 
+	uint32		hashvalue;	/* hash value of the dictionary's OID */
+	bool		shmem_valid;
+
 	TransactionId	dict_xmin;	/* XMIN of the dictionary's tuple */
 	TransactionId	dict_xmax;	/* XMAX of the dictionary's tuple */
 	ItemPointerData	dict_tid;	/* TID of the dictionary's tuple */

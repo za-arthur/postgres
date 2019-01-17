@@ -40,6 +40,7 @@
 #include "nodes/makefuncs.h"
 #include "parser/parse_func.h"
 #include "tsearch/ts_cache.h"
+#include "tsearch/ts_shared.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -528,6 +529,11 @@ RemoveTSDictionaryById(Oid dictId)
 
 	CatalogTupleDelete(relation, &tup->t_self);
 
+	ts_dict_shmem_release(dictId,
+						  HeapTupleHeaderGetRawXmin(tup->t_data),
+						  HeapTupleHeaderGetRawXmax(tup->t_data),
+						  tup->t_self, true);
+
 	ReleaseSysCache(tup);
 
 	table_close(relation, RowExclusiveLock);
@@ -636,6 +642,11 @@ AlterTSDictionary(AlterTSDictionaryStmt *stmt)
 	InvokeObjectPostAlterHook(TSDictionaryRelationId, dictId, 0);
 
 	ObjectAddressSet(address, TSDictionaryRelationId, dictId);
+
+	ts_dict_shmem_release(dictId,
+						  HeapTupleHeaderGetRawXmin(tup->t_data),
+						  HeapTupleHeaderGetRawXmax(tup->t_data),
+						  tup->t_self, true);
 
 	/*
 	 * NOTE: because we only support altering the options, not the template,
