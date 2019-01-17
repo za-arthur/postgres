@@ -29,7 +29,7 @@ typedef struct
 Datum
 dispell_init(PG_FUNCTION_ARGS)
 {
-	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
+	DictInitData *init_data = (DictInitData *) PG_GETARG_POINTER(0);
 	DictISpell *d;
 	bool		affloaded = false,
 				dictloaded = false,
@@ -40,7 +40,7 @@ dispell_init(PG_FUNCTION_ARGS)
 
 	NIStartBuild(&(d->obj));
 
-	foreach(l, dictoptions)
+	foreach(l, init_data->dict_options)
 	{
 		DefElem    *defel = (DefElem *) lfirst(l);
 
