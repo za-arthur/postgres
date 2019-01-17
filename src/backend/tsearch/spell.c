@@ -78,6 +78,8 @@
 #define tmpalloc(sz)  MemoryContextAlloc(Conf->buildCxt, (sz))
 #define tmpalloc0(sz)  MemoryContextAllocZero(Conf->buildCxt, (sz))
 
+#define tmpstrdup(str)	MemoryContextStrdup(Conf->buildCxt, (str))
+
 /*
  * Prepare for constructing an ISpell dictionary.
  *
@@ -498,7 +500,7 @@ NIAddSpell(IspellDict *Conf, const char *word, const char *flag)
 	Conf->Spell[Conf->nspell] = (SPELL *) tmpalloc(SPELLHDRSZ + strlen(word) + 1);
 	strcpy(Conf->Spell[Conf->nspell]->word, word);
 	Conf->Spell[Conf->nspell]->p.flag = (*flag != '\0')
-		? cpstrdup(Conf, flag) : VoidString;
+		? tmpstrdup(flag) : VoidString;
 	Conf->nspell++;
 }
 
@@ -1040,7 +1042,7 @@ setCompoundAffixFlagValue(IspellDict *Conf, CompoundAffixFlag *entry,
 		entry->flag.i = i;
 	}
 	else
-		entry->flag.s = cpstrdup(Conf, s);
+		entry->flag.s = tmpstrdup(s);
 
 	entry->flagMode = Conf->flagMode;
 	entry->value = val;
@@ -1541,6 +1543,9 @@ nextline:
 	return;
 
 isnewformat:
+	pfree(recoded);
+	pfree(pstr);
+
 	if (oldformat)
 		ereport(ERROR,
 				(errcode(ERRCODE_CONFIG_FILE_ERROR),
