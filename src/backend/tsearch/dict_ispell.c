@@ -5,6 +5,11 @@
  *
  * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  *
+ * Compiled Ispell dictionaries are stored in DSM.  All necessary data are built
+ * within dispell_build() function.  But structures for regular expressions are
+ * compiled on first demand and stored using AffixReg array.  It is because
+ * regex_t and Regis cannot be stored in shared memory easily.
+ *
  *
  * IDENTIFICATION
  *	  src/backend/tsearch/dict_ispell.c
@@ -14,95 +19,57 @@
 #include "postgres.h"
 
 #include "commands/defrem.h"
+#include "storage/dsm.h"
 #include "tsearch/dicts/spell.h"
 #include "tsearch/ts_locale.h"
+#include "tsearch/ts_shared.h"
 #include "tsearch/ts_utils.h"
 #include "utils/builtins.h"
 
 
 typedef struct
 {
+	char	   *dict_name;
 	StopList	stoplist;
 	IspellDict	obj;
 } DictISpell;
+
+static void parse_dictoptions(List *dictoptions,
+							  char **dictfile, char **afffile, char **stopfile);
+static void *dispell_build(List *dictoptions, Size *size);
 
 Datum
 dispell_init(PG_FUNCTION_ARGS)
 {
 	DictInitData *init_data = (DictInitData *) PG_GETARG_POINTER(0);
 	DictISpell *d;
-	bool		affloaded = false,
-				dictloaded = false,
-				stoploaded = false;
-	ListCell   *l;
+	Size		dict_size;
+	char	   *stopfile;
 
 	d = (DictISpell *) palloc0(sizeof(DictISpell));
 
-	NIStartBuild(&(d->obj));
+	parse_dictoptions(init_data->dict_options, NULL, NULL, &stopfile);
 
-	foreach(l, init_data->dict_options)
-	{
-		DefElem    *defel = (DefElem *) lfirst(l);
+	if (stopfile)
+		readstoplist(stopfile, &(d->stoplist), lowerstr);
 
-		if (strcmp(defel->defname, "dictfile") == 0)
-		{
-			if (dictloaded)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("multiple DictFile parameters")));
-			NIImportDictionary(&(d->obj),
-							   get_tsearch_config_filename(defGetString(defel),
-														   "dict"));
-			dictloaded = true;
-		}
-		else if (strcmp(defel->defname, "afffile") == 0)
-		{
-			if (affloaded)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("multiple AffFile parameters")));
-			NIImportAffixes(&(d->obj),
-							get_tsearch_config_filename(defGetString(defel),
-														"affix"));
-			affloaded = true;
-		}
-		else if (strcmp(defel->defname, "stopwords") == 0)
-		{
-			if (stoploaded)
-				ereport(ERROR,
-						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-						 errmsg("multiple StopWords parameters")));
-			readstoplist(defGetString(defel), &(d->stoplist), lowerstr);
-			stoploaded = true;
-		}
-		else
-		{
-			ereport(ERROR,
-					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-					 errmsg("unrecognized Ispell parameter: \"%s\"",
-							defel->defname)));
-		}
-	}
-
-	if (affloaded && dictloaded)
-	{
-		NISortDictionary(&(d->obj));
-		NISortAffixes(&(d->obj));
-	}
-	else if (!affloaded)
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("missing AffFile parameter")));
-	}
+	/*
+	 * Build the dictionary in backend's memory if dictid is invalid (it may
+	 * happen if the dicionary's init method was called within
+	 * verify_dictoptions()).
+	 */
+	if (!OidIsValid(init_data->dict.id))
+		d->obj.dict = dispell_build(init_data->dict_options, &dict_size);
 	else
 	{
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("missing DictFile parameter")));
+		d->dict_name = ts_dict_shared_init(init_data, dispell_build);
+		d->obj.dict = (IspellDictData *) ts_dict_shared_attach(d->dict_name,
+															   &dict_size);
 	}
+	d->obj.reg = (AffixReg *) palloc0(d->obj.dict->nAffix * sizeof(AffixReg));
 
-	NIFinishBuild(&(d->obj));
+	/* Current memory context is dictionary's private memory context */
+	d->obj.dictCtx = CurrentMemoryContext;
 
 	PG_RETURN_POINTER(d);
 }
@@ -145,4 +112,112 @@ dispell_lexize(PG_FUNCTION_ARGS)
 	cptr->lexeme = NULL;
 
 	PG_RETURN_POINTER(res);
+}
+
+static void
+parse_dictoptions(List *dictoptions, char **dictfile, char **afffile,
+				  char **stopfile)
+{
+	ListCell   *l;
+
+	if (dictfile)
+		*dictfile = NULL;
+	if (afffile)
+		*afffile = NULL;
+	if (stopfile)
+		*stopfile = NULL;
+
+	foreach(l, dictoptions)
+	{
+		DefElem    *defel = (DefElem *) lfirst(l);
+
+		if (strcmp(defel->defname, "dictfile") == 0)
+		{
+			if (!dictfile)
+				continue;
+
+			if (*dictfile)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple DictFile parameters")));
+			*dictfile = get_tsearch_config_filename(defGetString(defel), "dict");
+		}
+		else if (strcmp(defel->defname, "afffile") == 0)
+		{
+			if (!afffile)
+				continue;
+
+			if (*afffile)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple AffFile parameters")));
+			*afffile = get_tsearch_config_filename(defGetString(defel), "affix");
+		}
+		else if (strcmp(defel->defname, "stopwords") == 0)
+		{
+			if (!stopfile)
+				continue;
+
+			if (*stopfile)
+				ereport(ERROR,
+						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						 errmsg("multiple StopWords parameters")));
+			*stopfile = defGetString(defel);
+		}
+		else
+		{
+			ereport(ERROR,
+					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+					 errmsg("unrecognized Ispell parameter: \"%s\"",
+							defel->defname)));
+		}
+	}
+}
+
+/*
+ * Build the dictionary.
+ *
+ * Result is palloc'ed.
+ */
+static void *
+dispell_build(List *dictoptions, Size *size)
+{
+	IspellDictBuild build;
+	char	   *dictfile,
+			   *afffile;
+
+	parse_dictoptions(dictoptions, &dictfile, &afffile, NULL);
+
+	if (!afffile)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("missing AffFile parameter")));
+	}
+	else if (!dictfile)
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("missing DictFile parameter")));
+	}
+
+	MemSet(&build, 0, sizeof(build));
+	NIStartBuild(&build);
+
+	/* Read files */
+	NIImportDictionary(&build, dictfile);
+	NIImportAffixes(&build, afffile);
+
+	/* Build persistent data to use by backends */
+	NISortDictionary(&build);
+	NISortAffixes(&build);
+
+	NICopyData(&build);
+
+	/* Release temporary data */
+	NIFinishBuild(&build);
+
+	/* Return the buffer and its size */
+	*size = build.dict_size;
+	return build.dict;
 }
